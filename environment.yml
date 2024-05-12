@@ -7,6 +7,7 @@ channels:
 dependencies:
   - _libgcc_mutex=0.1=conda_forge
   - _openmp_mutex=4.5=2_gnu
+  - asttokens=2.4.1=pyhd8ed1ab_0
   - blas=1.0=mkl
   - brotli-python=1.1.0=py312h30efb56_1
   - bzip2=1.0.8=hd590300_5
@@ -21,6 +22,9 @@ dependencies:
   - cuda-nvtx=12.1.105=0
   - cuda-opencl=12.4.127=0
   - cuda-runtime=12.1.0=0
+  - decorator=5.1.1=pyhd8ed1ab_0
+  - exceptiongroup=1.2.0=pyhd8ed1ab_2
+  - executing=2.0.1=pyhd8ed1ab_0
   - ffmpeg=4.3=hf484d3e_0
   - filelock=3.14.0=pyhd8ed1ab_0
   - freetype=2.12.1=h267a509_2
@@ -29,6 +33,8 @@ dependencies:
   - icu=73.2=h59595ed_0
   - idna=3.7=pyhd8ed1ab_0
   - intel-openmp=2023.1.0=hdb19cb5_46306
+  - ipython=8.24.0=pyh707e725_0
+  - jedi=0.19.1=pyhd8ed1ab_0
   - jinja2=3.1.4=pyhd8ed1ab_0
   - jpeg=9e=h166bdaf_2
   - lame=3.100=h166bdaf_1003
@@ -69,6 +75,7 @@ dependencies:
   - libzlib=1.2.13=hd590300_5
   - llvm-openmp=15.0.7=h0cdce71_0
   - markupsafe=2.1.5=py312h98912ed_0
+  - matplotlib-inline=0.1.7=pyhd8ed1ab_0
   - mkl=2023.1.0=h213fc3f_46344
   - mpmath=1.3.0=pyhd8ed1ab_0
   - ncurses=6.5=h59595ed_0
@@ -78,8 +85,15 @@ dependencies:
   - openh264=2.1.1=h780b84a_0
   - openjpeg=2.5.0=hfec8fc6_2
   - openssl=3.3.0=hd590300_0
+  - parso=0.8.4=pyhd8ed1ab_0
+  - pexpect=4.9.0=pyhd8ed1ab_0
+  - pickleshare=0.7.5=py_1003
   - pillow=10.3.0=py312h5eee18b_0
   - pip=24.0=pyhd8ed1ab_0
+  - prompt-toolkit=3.0.42=pyha770c72_0
+  - ptyprocess=0.7.0=pyhd3deb0d_0
+  - pure_eval=0.2.2=pyhd8ed1ab_0
+  - pygments=2.18.0=pyhd8ed1ab_0
   - pysocks=1.7.1=pyha2e5f31_6
   - python=3.12.3=hab00c5b_0_cpython
   - python_abi=3.12=4_cp312
@@ -90,15 +104,19 @@ dependencies:
   - readline=8.2=h8228510_1
   - requests=2.31.0=pyhd8ed1ab_0
   - setuptools=69.5.1=pyhd8ed1ab_0
+  - six=1.16.0=pyh6c4a22f_0
+  - stack_data=0.6.2=pyhd8ed1ab_0
   - sympy=1.12=pyh04b8f61_3
   - tbb=2021.12.0=h00ab1b0_0
   - tk=8.6.13=noxft_h4845f30_101
   - torchaudio=2.3.0=py312_cu121
   - torchvision=0.18.0=py312_cu121
   - tqdm=4.66.4=pyhd8ed1ab_0
+  - traitlets=5.14.3=pyhd8ed1ab_0
   - typing_extensions=4.11.0=pyha770c72_0
   - tzdata=2024a=h0c530f3_0
   - urllib3=2.2.1=pyhd8ed1ab_0
+  - wcwidth=0.2.13=pyhd8ed1ab_0
   - wheel=0.43.0=pyhd8ed1ab_1
   - xz=5.2.6=h166bdaf_0
   - yaml=0.2.5=h7f98852_2
