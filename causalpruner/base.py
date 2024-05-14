@@ -17,13 +17,14 @@ class CausalWeightsTrainer(nn.Module):
     def forward(self, X: torch.Tensor) -> torch.Tensor:
         return self.layer(X)
 
-    def fit(self, X: torch.Tensor, Y: torch.Tensor, num_epochs: int = 1):
-        for _ in range(num_epochs):
-            self.optimizer.zero_grad()
-            Y_hat = torch.flatten(self.forward(X))
-            loss = F.mse_loss(Y_hat, Y)
-            loss.backward()
-            self.optimizer.step()
+    def fit(self, X: torch.Tensor, Y: torch.Tensor):
+        self.layer.train()
+        Y_hat = torch.squeeze(self.forward(X), dim=1)
+        Y = torch.flatten(Y)
+        loss = F.mse_loss(Y_hat, Y)
+        loss.backward()
+        self.optimizer.step()
+        self.optimizer.zero_grad()
 
     def get_weights(self) -> torch.Tensor:
         return torch.flatten(self.layer.weight.detach().clone())

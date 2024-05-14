@@ -1,10 +1,14 @@
 from causalpruner import base
 
+import os
+import shutil
+from typing import Optional
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.utils.prune as prune
-from typing import Optional
+from torch.utils.data import Dataset, DataLoader
 
 
 class SGDPruner(base.CausalPruner):
@@ -62,7 +66,7 @@ class OnlineSGDPruner(SGDPruner):
         if self.counter % self.num_epochs_batched == 0:
             self._train_pruning_weights()
 
-    def _train_pruning_weights(self) -> None:
+    def train_pruning_weights(self) -> None:
         self.counter = 0
         delta_losses = torch.diff(self.losses)
         for param_name in self.params_dict:
@@ -70,20 +74,109 @@ class OnlineSGDPruner(SGDPruner):
             delta_weights = torch.diff(weights, dim=0)
             delta_weights_squared = torch.pow(delta_weights, 2)
             trainer = self.causal_weights_trainers[param_name]
-            trainer.fit(delta_weights_squared, delta_losses,
-                        self.causal_weights_num_epochs)
+            for _ in range(self.causal_weights_num_epochs):
+                trainer.fit(delta_weights_squared, delta_losses)
 
 
-class DiskSGDPruner(SGDPruner):
+class ParamDataset(Dataset):
 
-    def __init__(
-            self, model: nn.Module, *, prune_threshold=1e-3,
-            checkpoint_dir: str = ''):
+    def __init__(self, param_base_dir: str, loss_base_dir: str, transform=None):
+        self.param_base_dir = param_base_dir
+        self.loss_base_dir = loss_base_dir
+        self.num_items = min(len(os.listdir(self.param_base_dir)),
+                             len(os.listdir(self.loss_base_dir)))
+        self.transform = transform
+
+    def __len__(self) -> int:
+        return self.num_items - 1
+
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+        param_delta = self.get_delta(self.param_base_dir, idx)
+        loss_delta = self.get_delta(self.loss_base_dir, idx)
+        if self.transform:
+            param_delta = self.transform(param_delta)
+        return param_delta, loss_delta
+
+    def get_delta(self, dir: str, idx: int) -> torch.Tensor:
+        first_file_path = os.path.join(dir, f'ckpt.{idx}')
+        first_tensor = torch.flatten(torch.load(first_file_path))
+        second_file_path = os.path.join(dir, f'ckpt.{idx + 1}')
+        second_tensor = torch.flatten(torch.load(second_file_path))
+        return first_tensor - second_tensor
+
+
+class CheckpointSGDPruner(SGDPruner):
+
+    def __init__(self, model: nn.Module, checkpoint_dir: str,
+                 *, start_clean: bool = True,
+                 end_clean: bool = False,
+                 prune_threshold: float = 1e-3,
+                 causal_weights_batch_size: int = 16,
+                 causal_weights_num_epochs: int = 10):
         super().__init__(model, prune_threshold)
         self.checkpoint_dir = checkpoint_dir
+        self.end_clean = end_clean
+        if start_clean:
+            self._remove_checkpoint_dir()
+        self._ensure_checkpoint_dir_exists()
+        self.causal_weights_batch_size = causal_weights_batch_size
+        self.causal_weights_num_epochs = causal_weights_num_epochs
+        self.loss_checkpoint_dir = os.path.join(self.checkpoint_dir, 'loss')
+        os.makedirs(self.loss_checkpoint_dir, exist_ok=True)
+        self.param_checkpoint_dirs = dict()
+        for param_name in self.params_dict:
+            self.param_checkpoint_dirs[param_name] = os.path.join(
+                self.checkpoint_dir, param_name)
+            os.makedirs(self.param_checkpoint_dirs[param_name],
+                        exist_ok=True)
 
-    def compute_masks(self) -> None:
-        pass
+    def __del__(self):
+        if self.end_clean:
+            self._remove_checkpoint_dir()
+
+    def _remove_checkpoint_dir(self):
+        shutil.rmtree(self.checkpoint_dir)
+
+    def _ensure_checkpoint_dir_exists(self):
+        if os.path.isdir(self.checkpoint_dir):
+            return
+        os.makedirs(self.checkpoint_dir)
+
+    def provide_loss(self, loss: torch.Tensor) -> None:
+        torch.save(loss, self.get_checkpoint_path('loss'))
+        for param_name, param in self.params_dict.items():
+            torch.save(param, self.get_checkpoint_path(param_name))
+        self.counter += 1
+
+    def get_checkpoint_path(self, param_name: str) -> str:
+        if param_name == 'loss':
+            path = self.loss_checkpoint_dir
+        else:
+            path = self.param_checkpoint_dirs[param_name]
+        return os.path.join(path, f'ckpt.{self.counter}')
+
+    def compute_masks(self):
+        self.train_pruning_weights()
+        super().compute_masks()
+
+    def train_pruning_weights(self) -> None:
+        for param, param_dir in self.param_checkpoint_dirs.items():
+            self._train_pruning_weights_for_param(param, param_dir)
+
+    def _train_pruning_weights_for_param(
+            self, param: str, param_dir: str) -> None:
+        dataset = ParamDataset(
+            param_dir, self.loss_checkpoint_dir,
+            transform=lambda d: torch.pow(d, 2))
+        dataloader = DataLoader(
+            dataset,
+            batch_size=self.causal_weights_batch_size,
+            shuffle=True
+        )
+        for _ in range(self.causal_weights_num_epochs):
+            for param_delta, loss_delta in dataloader:
+                self.causal_weights_trainers[param].fit(
+                    param_delta, loss_delta)
 
 
 def get_sgd_pruner(
@@ -91,7 +184,6 @@ def get_sgd_pruner(
         checkpoint_dir: str = '') -> Optional[SGDPruner]:
     if online:
         return OnlineSGDPruner(model)
-    # else:
-    #     assert checkpoint_dir != ''
-    #     return DiskSGDPruner(model, checkpoint_dir)
-    return None
+    else:
+        assert checkpoint_dir != ''
+        return CheckpointSGDPruner(model, checkpoint_dir)
