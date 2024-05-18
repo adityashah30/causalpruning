@@ -1,4 +1,5 @@
-from causalpruner.base import CausalPruner, best_device
+from causalpruner.base import best_device
+from causalpruner.causal_pruner_base import CausalPruner
 
 import os
 import shutil
@@ -178,10 +179,10 @@ class CheckpointSGDPruner(SGDPruner):
 
 
 def get_sgd_pruner(
-        model: nn.Module, *, mometum: bool = False, online: bool = True,
-        checkpoint_dir: str = '') -> Optional[SGDPruner]:
+        model: nn.Module, *, momentum: bool = False, online: bool = True,
+        checkpoint_dir: str = '') -> SGDPruner:
     if online:
-        return OnlineSGDPruner(model, momentum=mometum)
+        return OnlineSGDPruner(model, momentum=momentum)
     else:
         assert checkpoint_dir != ''
-        return CheckpointSGDPruner(model, checkpoint_dir, momentum=mometum)
+        return CheckpointSGDPruner(model, checkpoint_dir, momentum=momentum)
