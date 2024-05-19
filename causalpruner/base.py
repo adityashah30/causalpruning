@@ -13,7 +13,7 @@ def best_device() -> torch.device:
     return device
 
 
-class Pruner(ABC, nn.Module):
+class Pruner(ABC):
 
     @staticmethod
     def is_module_supported(module: nn.Module) -> bool:
