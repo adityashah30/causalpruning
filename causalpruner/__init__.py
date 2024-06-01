@@ -1,7 +1,6 @@
 from .base import best_device, Pruner
-from .causal_pruner_base import CausalWeightsTrainer, CausalPruner
 from .sgd_pruner import get_sgd_pruner
-from .sgd_pruner import SGDPruner, OnlineSGDPruner, CheckpointSGDPruner
+from .sgd_pruner import CausalPruner, OnlineSGDPruner, CheckpointSGDPruner
 
 from typing import Optional
 
