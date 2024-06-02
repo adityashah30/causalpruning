@@ -2,6 +2,7 @@ from causalpruner.base import Pruner, best_device
 
 from abc import abstractmethod
 import os
+import shutil
 from typing import Union
 
 import numpy as np
@@ -31,7 +32,8 @@ class CausalWeightsTrainer(nn.Module):
             "CausalWeightsTrainer is an abstract class.")
 
     @abstractmethod
-    def get_non_zero_weights(self) -> torch.Tensor:
+    def get_non_zero_weights(
+            self, prune_threshold: Union[None, float] = None) -> torch.Tensor:
         raise NotImplementedError(
             "CausalWeightsTrainer is an abstract class.")
 
@@ -64,9 +66,12 @@ class CausalWeightsTrainerVanilla(CausalWeightsTrainer):
         self.optimizer.step()
         self.optimizer.zero_grad()
 
-    def get_non_zero_weights(self) -> torch.Tensor:
+    def get_non_zero_weights(
+            self, prune_threshold: Union[None, float] = None) -> torch.Tensor:
+        if prune_threshold is None:
+            prune_threshold = self.prune_threshold
         weights = torch.flatten(self.layer.weight.detach().clone())
-        weights_mask = torch.abs(weights) <= self.prune_threshold
+        weights_mask = torch.abs(weights) <= prune_threshold
         return torch.where(weights_mask, 0, 1)
 
 
@@ -114,13 +119,16 @@ class CausalWeightsTrainerMomentum(CausalWeightsTrainer):
         self.optimizer.step()
         self.optimizer.zero_grad()
 
-    def get_non_zero_weights(self) -> torch.Tensor:
+    def get_non_zero_weights(
+            self, prune_threshold: Union[None, float] = None) -> torch.Tensor:
+        if prune_threshold is None:
+            prune_threshold = self.prune_threshold
         weights1 = torch.flatten(self.layer1.weight.detach().clone())
-        weights1_mask = torch.abs(weights1) <= self.prune_threshold
+        weights1_mask = torch.abs(weights1) <= prune_threshold
         weights2 = torch.flatten(self.layer1.weight.detach().clone())
-        weights2_mask = torch.abs(weights2) <= self.prune_threshold
+        weights2_mask = torch.abs(weights2) <= prune_threshold
         weights3 = torch.flatten(self.layer1.weight.detach().clone())
-        weights3_mask = torch.abs(weights3) <= self.prune_threshold
+        weights3_mask = torch.abs(weights3) <= prune_threshold
         return torch.where(
             weights1_mask & weights2_mask & weights3_mask, 0, 1)
 
@@ -175,13 +183,17 @@ class CausalPruner(Pruner):
         flattened_weight = torch.flatten(weight)
         return flattened_weight
 
-    def get_mask(self, name: str) -> torch.Tensor:
+    def get_mask(
+            self, name: str,
+            pruning_threshold: Union[float, None] = None) -> torch.Tensor:
         trainer = self.causal_weights_trainers[name]
-        return trainer.get_non_zero_weights()
+        return trainer.get_non_zero_weights(pruning_threshold)
 
-    def compute_masks(self) -> None:
+    def compute_masks(
+            self, pruning_threshold: Union[float, None] = None) -> None:
+        self.train_pruning_weights()
         for module_name, module in self.modules_dict.items():
-            mask = self.get_mask(module_name)
+            mask = self.get_mask(module_name, pruning_threshold)
             mask = torch.reshape(
                 mask, self.params_dict[module_name].size())
             prune.custom_from_mask(module, 'weight', mask)
@@ -239,18 +251,19 @@ class OnlineSGDPruner(CausalPruner):
 
     def get_delta_params(self, params) -> Union[torch.Tensor,
                                                 tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+        params = params[:self.counter]
         if self.momentum:
             return self.get_delta_params_momentum(params)
         return self.get_delta_params_vanilla(params)
 
     def get_delta_losses(self, losses: torch.Tensor) -> torch.Tensor:
+        losses = losses[:self.counter]
         delta_losses = torch.diff(losses)
         if self.momentum:
             delta_losses = delta_losses[1:]
         return delta_losses
 
     def train_pruning_weights(self) -> None:
-        self.counter = 0
         delta_losses = self.get_delta_losses(self.losses)
         for param_name in self.params_dict:
             params = self.weights[param_name]
@@ -258,6 +271,14 @@ class OnlineSGDPruner(CausalPruner):
             trainer = self.causal_weights_trainers[param_name]
             for _ in range(self.causal_weights_num_epochs):
                 trainer.fit(delta_params, delta_losses)
+        self.reset_state()
+
+    def reset_state(self):
+        self.losses[0] = self.losses[self.counter - 1]
+        for param_name in self.params_dict:
+            weight = self.weights[param_name]
+            weight[0] = weight[self.counter - 1]
+        self.counter = 1
 
 
 class ParamDataset(Dataset):
@@ -322,11 +343,14 @@ class CheckpointSGDPruner(CausalPruner):
             l1_regularization_coeff: float,
             causal_weights_batch_size: int,
             causal_weights_num_epochs: int,
+            start_clean: bool,
             device: Union[str, torch.device] = best_device()):
         super().__init__(
             model, momentum, prune_threshold,
             l1_regularization_coeff, device)
         self.checkpoint_dir = checkpoint_dir
+        if start_clean and os.path.exists(self.checkpoint_dir):
+            shutil.rmtree(self.checkpoint_dir)
         os.makedirs(self.checkpoint_dir, exist_ok=True)
         self.causal_weights_batch_size = causal_weights_batch_size
         self.causal_weights_num_epochs = causal_weights_num_epochs
@@ -380,14 +404,17 @@ class CheckpointSGDPruner(CausalPruner):
 def get_sgd_pruner(
         model: nn.Module, *,
         momentum: bool = False,
-        prune_threshold: float = 1e-3,
+        prune_threshold: float = 5e-6,
         l1_regularization_coeff: float = 1e-5,
         online: bool = True,
         num_epochs_batched: int = 16,
         checkpoint_dir: str = '',
         causal_weights_batch_size: int = 16,
         causal_weights_num_epochs: int = 10,
+        start_clean: bool = True,
         device=best_device()) -> CausalPruner:
+    if checkpoint_dir != '':
+        online = False
     if online:
         return OnlineSGDPruner(
             model, momentum, prune_threshold, l1_regularization_coeff,
@@ -397,4 +424,4 @@ def get_sgd_pruner(
         return CheckpointSGDPruner(
             model, checkpoint_dir, momentum, prune_threshold,
             l1_regularization_coeff, causal_weights_batch_size,
-            causal_weights_num_epochs, device)
+            causal_weights_num_epochs, start_clean, device)
