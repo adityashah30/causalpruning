@@ -17,10 +17,12 @@ from torch.utils.data import Dataset, DataLoader
 class CausalWeightsTrainer(nn.Module):
 
     def __init__(self, model_weights: torch.Tensor,
+                 lr: float,
                  prune_threshold: float,
                  l1_regularization_coeff: float,
                  device: Union[str, torch.device] = best_device()):
         super().__init__()
+        self.lr = lr
         self.prune_threshold = prune_threshold
         self.device = device
         self.l1_regularization_coeff = l1_regularization_coeff
@@ -41,14 +43,15 @@ class CausalWeightsTrainer(nn.Module):
 class CausalWeightsTrainerVanilla(CausalWeightsTrainer):
 
     def __init__(self, model_weights: torch.Tensor,
+                 lr: float,
                  prune_threshold: float,
                  l1_regularization_coeff: float,
                  device: Union[str, torch.device] = best_device()):
-        super().__init__(model_weights, prune_threshold,
+        super().__init__(model_weights, lr, prune_threshold,
                          l1_regularization_coeff, device=device)
         self.layer = nn.Linear(
             self.flattened_dims, 1, bias=False, device=self.device)
-        self.optimizer = optim.Adam(self.parameters())
+        self.optimizer = optim.Adam(self.parameters(), lr=self.lr)
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
         return self.layer(X)
@@ -78,10 +81,11 @@ class CausalWeightsTrainerVanilla(CausalWeightsTrainer):
 class CausalWeightsTrainerMomentum(CausalWeightsTrainer):
 
     def __init__(self, model_weights: torch.Tensor,
+                 lr: float,
                  prune_threshold: float,
                  l1_regularization_coeff: float,
                  device: Union[str, torch.device] = best_device()):
-        super().__init__(model_weights, prune_threshold,
+        super().__init__(model_weights, lr, prune_threshold,
                          l1_regularization_coeff, device=device)
 
         self.layer1 = nn.Linear(
@@ -90,7 +94,7 @@ class CausalWeightsTrainerMomentum(CausalWeightsTrainer):
             self.flattened_dims, 1, bias=False, device=self.device)
         self.layer3 = nn.Linear(
             self.flattened_dims, 1, bias=False, device=self.device)
-        self.optimizer = optim.Adam(self.parameters())
+        self.optimizer = optim.Adam(self.parameters(), lr=self.lr)
 
     def forward(self, delta_weights_k_0_sq: torch.Tensor,
                 delta_weights_k_1_sq: torch.Tensor,
@@ -125,160 +129,12 @@ class CausalWeightsTrainerMomentum(CausalWeightsTrainer):
             prune_threshold = self.prune_threshold
         weights1 = torch.flatten(self.layer1.weight.detach().clone())
         weights1_mask = torch.abs(weights1) <= prune_threshold
-        weights2 = torch.flatten(self.layer1.weight.detach().clone())
+        weights2 = torch.flatten(self.layer2.weight.detach().clone())
         weights2_mask = torch.abs(weights2) <= prune_threshold
-        weights3 = torch.flatten(self.layer1.weight.detach().clone())
+        weights3 = torch.flatten(self.layer3.weight.detach().clone())
         weights3_mask = torch.abs(weights3) <= prune_threshold
         return torch.where(
             weights1_mask & weights2_mask & weights3_mask, 0, 1)
-
-
-class CausalPruner(Pruner):
-
-    _SUPPORTED_MODULES = [
-        nn.Linear,
-        nn.Conv1d,
-        nn.Conv2d,
-        nn.Conv3d,
-    ]
-
-    @staticmethod
-    def is_module_supported(module: nn.Module) -> bool:
-        for supported_module in CausalPruner._SUPPORTED_MODULES:
-            if isinstance(module, supported_module):
-                return True
-        return False
-
-    def __init__(self, model: nn.Module,
-                 momentum: bool,
-                 prune_threshold: float,
-                 l1_regularization_coeff: float,
-                 device: Union[str, torch.device] = best_device()):
-        super().__init__(model, device)
-
-        self.momentum = momentum
-        self.prune_threshold = prune_threshold
-        self.counter = 0
-
-        trainer = CausalWeightsTrainerVanilla
-        if self.momentum:
-            trainer = CausalWeightsTrainerMomentum
-
-        self.causal_weights_trainers = nn.ModuleDict()
-        for param_name, param in self.params_dict.items():
-            self.causal_weights_trainers[param_name] = trainer(
-                param, self.prune_threshold, l1_regularization_coeff,
-                self.device)
-
-    @abstractmethod
-    def provide_loss(self, loss: torch.Tensor) -> None:
-        pass
-
-    @abstractmethod
-    def train_pruning_weights(self) -> None:
-        pass
-
-    def get_flattened_weight(self, name: str) -> torch.Tensor:
-        weight = self.params_dict[name].detach().clone()
-        flattened_weight = torch.flatten(weight)
-        return flattened_weight
-
-    def get_mask(
-            self, name: str,
-            pruning_threshold: Union[float, None] = None) -> torch.Tensor:
-        trainer = self.causal_weights_trainers[name]
-        return trainer.get_non_zero_weights(pruning_threshold)
-
-    def compute_masks(
-            self, pruning_threshold: Union[float, None] = None) -> None:
-        self.train_pruning_weights()
-        for module_name, module in self.modules_dict.items():
-            mask = self.get_mask(module_name, pruning_threshold)
-            mask = torch.reshape(
-                mask, self.params_dict[module_name].size())
-            prune.custom_from_mask(module, 'weight', mask)
-
-
-class OnlineSGDPruner(CausalPruner):
-
-    def __init__(self, model: nn.Module,
-                 momentum: bool,
-                 prune_threshold: float,
-                 l1_regularization_coeff: float,
-                 num_epochs_batched: int,
-                 causal_weights_num_epochs: int,
-                 device: Union[str, torch.device] = best_device()):
-        super().__init__(
-            model, momentum, prune_threshold, l1_regularization_coeff, device)
-        self.num_epochs_batched = num_epochs_batched
-        self.causal_weights_num_epochs = causal_weights_num_epochs
-        self.weights = dict()
-        device = torch.device('cpu')
-        for param_name, param in self.params_dict.items():
-            device = param.device
-            param_size = np.prod(param.size(), dtype=int)
-            self.weights[param_name] = torch.zeros(
-                (self.num_epochs_batched, param_size), device=device)
-        self.losses = torch.zeros(
-            self.num_epochs_batched, device=device)
-
-    def provide_loss(self, loss: torch.Tensor) -> None:
-        self.losses[self.counter] = loss.detach().clone()
-        for param_name in self.params_dict:
-            self.weights[param_name][
-                self.counter] = self.get_flattened_weight(param_name)
-        self.counter += 1
-        if self.counter % self.num_epochs_batched == 0:
-            self.train_pruning_weights()
-
-    def get_delta_params_vanilla(
-            self, params: torch.Tensor) -> torch.Tensor:
-        delta_params = torch.diff(params, dim=0)
-        delta_params = torch.square(delta_params)
-        return delta_params
-
-    def get_delta_params_momentum(self, params: torch.Tensor) -> tuple[
-            torch.Tensor, torch.Tensor, torch.Tensor]:
-        delta_params = torch.diff(params, dim=0)
-        delta_param_t = delta_params[:-1]
-        delta_param_t_sq = torch.square(delta_param_t)
-        delta_param_t_plus_1 = delta_params[1:]
-        delta_param_t_plus_1_sq = torch.square(delta_param_t_plus_1)
-        delta_param_t_t_plus_1 = delta_param_t * delta_param_t_plus_1
-        return (delta_param_t_sq,
-                delta_param_t_plus_1_sq,
-                delta_param_t_t_plus_1)
-
-    def get_delta_params(self, params) -> Union[torch.Tensor,
-                                                tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
-        params = params[:self.counter]
-        if self.momentum:
-            return self.get_delta_params_momentum(params)
-        return self.get_delta_params_vanilla(params)
-
-    def get_delta_losses(self, losses: torch.Tensor) -> torch.Tensor:
-        losses = losses[:self.counter]
-        delta_losses = torch.diff(losses)
-        if self.momentum:
-            delta_losses = delta_losses[1:]
-        return delta_losses
-
-    def train_pruning_weights(self) -> None:
-        delta_losses = self.get_delta_losses(self.losses)
-        for param_name in self.params_dict:
-            params = self.weights[param_name]
-            delta_params = self.get_delta_params(params)
-            trainer = self.causal_weights_trainers[param_name]
-            for _ in range(self.causal_weights_num_epochs):
-                trainer.fit(delta_params, delta_losses)
-        self.reset_state()
-
-    def reset_state(self):
-        self.losses[0] = self.losses[self.counter - 1]
-        for param_name in self.params_dict:
-            weight = self.weights[param_name]
-            weight[0] = weight[self.counter - 1]
-        self.counter = 1
 
 
 class ParamDataset(Dataset):
@@ -335,62 +191,138 @@ class ParamDataset(Dataset):
         return second_tensor - first_tensor
 
 
-class CheckpointSGDPruner(CausalPruner):
+class SGDPruner(Pruner):
+
+    _SUPPORTED_MODULES = [
+        nn.Linear,
+        nn.Conv1d,
+        nn.Conv2d,
+        nn.Conv3d,
+    ]
+
+    @staticmethod
+    def is_module_supported(module: nn.Module) -> bool:
+        for supported_module in SGDPruner._SUPPORTED_MODULES:
+            if isinstance(module, supported_module):
+                return True
+        return False
 
     def __init__(
             self, model: nn.Module, checkpoint_dir: str,
-            momentum: bool, prune_threshold: float,
+            momentum: bool, pruner_lr: float, prune_threshold: float,
             l1_regularization_coeff: float,
             causal_weights_batch_size: int,
             causal_weights_num_epochs: int,
             start_clean: bool,
             device: Union[str, torch.device] = best_device()):
-        super().__init__(
-            model, momentum, prune_threshold,
-            l1_regularization_coeff, device)
+        super().__init__(model, device)
+
+        self.momentum = momentum
+        self.iteration = -1
+        self.counter = 0
+        self.causal_weights_batch_size = causal_weights_batch_size
+        self.causal_weights_num_epochs = causal_weights_num_epochs
+
+        trainer = CausalWeightsTrainerVanilla
+        if self.momentum:
+            trainer = CausalWeightsTrainerMomentum
+        self.causal_weights_trainers = nn.ModuleDict()
+        for param in self.params:
+            module = self.modules_dict[param]
+            self.causal_weights_trainers[param] = trainer(
+                module.weight, pruner_lr, prune_threshold,
+                l1_regularization_coeff, self.device)
+
         self.checkpoint_dir = checkpoint_dir
         if start_clean and os.path.exists(self.checkpoint_dir):
             shutil.rmtree(self.checkpoint_dir)
         os.makedirs(self.checkpoint_dir, exist_ok=True)
-        self.causal_weights_batch_size = causal_weights_batch_size
-        self.causal_weights_num_epochs = causal_weights_num_epochs
+
         self.loss_checkpoint_dir = os.path.join(
             self.checkpoint_dir, 'loss')
         os.makedirs(self.loss_checkpoint_dir, exist_ok=True)
         self.param_checkpoint_dirs = dict()
-        for param_name in self.params_dict:
-            self.param_checkpoint_dirs[param_name] = os.path.join(
-                self.checkpoint_dir, param_name)
-            os.makedirs(self.param_checkpoint_dirs[param_name],
+        for param in self.params:
+            self.param_checkpoint_dirs[param] = os.path.join(
+                self.checkpoint_dir, param)
+            os.makedirs(self.param_checkpoint_dirs[param],
                         exist_ok=True)
 
+    def start_pruning(self) -> None:
+        for param in self.params:
+            param_dir = os.path.join(
+                self.param_checkpoint_dirs[param], 'initial')
+            os.makedirs(param_dir, exist_ok=True)
+            module = self.modules_dict[param]
+            torch.save(torch.flatten(module.weight.detach().clone()),
+                       os.path.join(param_dir, 'ckpt.initial'))
+
+    def start_iteration(self) -> None:
+        self.iteration += 1
+        iteration_name = f'{self.iteration}'
+        loss_dir = os.path.join(self.loss_checkpoint_dir, iteration_name)
+        os.makedirs(loss_dir, exist_ok=True)
+        for param in self.params:
+            param_dir = os.path.join(
+                self.param_checkpoint_dirs[param], iteration_name)
+            os.makedirs(param_dir, exist_ok=True)
+        self.counter = 0
+
     def provide_loss(self, loss: torch.Tensor) -> None:
-        torch.save(loss, self.get_checkpoint_path('loss'))
-        for param_name, param in self.params_dict.items():
-            torch.save(torch.flatten(param.detach().clone()),
-                       self.get_checkpoint_path(param_name))
+        torch.save(loss, self._get_checkpoint_path('loss'))
+        for param in self.params:
+            module = self.modules_dict[param]
+            torch.save(torch.flatten(module.weight.detach().clone()),
+                       self._get_checkpoint_path(param))
         self.counter += 1
-
-    def get_checkpoint_path(self, param_name: str) -> str:
-        if param_name == 'loss':
-            path = self.loss_checkpoint_dir
-        else:
-            path = self.param_checkpoint_dirs[param_name]
-        return os.path.join(path, f'ckpt.{self.counter}')
-
-    def compute_masks(self):
-        self.train_pruning_weights()
-        super().compute_masks()
 
     def train_pruning_weights(self) -> None:
         for param, param_dir in self.param_checkpoint_dirs.items():
             self._train_pruning_weights_for_param(param, param_dir)
 
+    def compute_masks(
+            self, pruning_threshold: Union[float, None] = None) -> None:
+        self.train_pruning_weights()
+        for module_name, module in self.modules_dict.items():
+            mask = self._get_mask(module_name, pruning_threshold)
+            prune.custom_from_mask(module, 'weight', mask)
+
+    def reset_weights(self) -> None:
+        for param in self.params:
+            initial_param_path = os.path.join(
+                self.param_checkpoint_dirs[param],
+                'initial/ckpt.initial')
+            initial_param = torch.load(initial_param_path)
+            with torch.no_grad():
+                weight = self.modules_dict[param].weight
+                initial_param = initial_param.reshape_as(weight)
+                weight.data = initial_param
+
+    def _get_mask(
+            self, name: str,
+            pruning_threshold: Union[float, None] = None) -> torch.Tensor:
+        trainer = self.causal_weights_trainers[name]
+        mask_this_iteration = trainer.get_non_zero_weights(pruning_threshold)
+        mask_this_iteration = torch.reshape(
+            mask_this_iteration, self.modules_dict[name].weight.size())
+        module = self.modules_dict[name]
+        if hasattr(module, 'weight_mask'):
+            mask = getattr(module, 'weight_mask')
+            mask_this_iteration = torch.logical_and(mask, mask_this_iteration)
+        return mask_this_iteration
+
+    def _get_checkpoint_path(self, param_name: str) -> str:
+        if param_name == 'loss':
+            path = self.loss_checkpoint_dir
+        else:
+            path = self.param_checkpoint_dirs[param_name]
+        return os.path.join(path, f'{self.iteration}', f'ckpt.{self.counter}')
+
     def _train_pruning_weights_for_param(
             self, param: str, param_dir: str) -> None:
-        dataset = ParamDataset(
-            param_dir, self.loss_checkpoint_dir,
-            self.momentum)
+        param_dir = os.path.join(param_dir, f'{self.iteration}')
+        loss_dir = os.path.join(self.loss_checkpoint_dir, f'{self.iteration}')
+        dataset = ParamDataset(param_dir, loss_dir, self.momentum)
         dataloader = DataLoader(
             dataset,
             batch_size=self.causal_weights_batch_size,
@@ -404,24 +336,16 @@ class CheckpointSGDPruner(CausalPruner):
 def get_sgd_pruner(
         model: nn.Module, *,
         momentum: bool = False,
+        pruner_lr: float = 1e-3,
         prune_threshold: float = 5e-6,
         l1_regularization_coeff: float = 1e-5,
-        online: bool = True,
-        num_epochs_batched: int = 16,
         checkpoint_dir: str = '',
         causal_weights_batch_size: int = 16,
         causal_weights_num_epochs: int = 10,
         start_clean: bool = True,
-        device=best_device()) -> CausalPruner:
-    if checkpoint_dir != '':
-        online = False
-    if online:
-        return OnlineSGDPruner(
-            model, momentum, prune_threshold, l1_regularization_coeff,
-            num_epochs_batched, causal_weights_num_epochs, device)
-    else:
-        assert checkpoint_dir != ''
-        return CheckpointSGDPruner(
-            model, checkpoint_dir, momentum, prune_threshold,
-            l1_regularization_coeff, causal_weights_batch_size,
-            causal_weights_num_epochs, start_clean, device)
+        device=best_device()) -> SGDPruner:
+    assert checkpoint_dir != ''
+    return SGDPruner(
+        model, checkpoint_dir, momentum, pruner_lr, prune_threshold,
+        l1_regularization_coeff, causal_weights_batch_size,
+        causal_weights_num_epochs, start_clean, device)

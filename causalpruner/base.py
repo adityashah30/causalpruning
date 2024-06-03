@@ -30,12 +30,10 @@ class Pruner(ABC):
             if self.is_module_supported(module):
                 self.modules_dict[name] = module
 
-        self.params_dict = nn.ParameterDict()
+        self.params = nn.ParameterList()
         for module_name, module in self.modules_dict.items():
-            for param_name, param in module.named_parameters():
-                if 'weight' not in param_name:
-                    continue
-                self.params_dict[module_name] = param
+            if hasattr(module, 'weight'):
+                self.params.append(module_name)
 
     @abstractmethod
     def compute_masks(self) -> None:

@@ -1,16 +1,16 @@
-from causalpruner import Pruner, best_device
-
 from typing import Union
 
 import torch
 import torch.nn as nn
 import torch.nn.utils.prune as prune
 
+from ..context import causalpruner
 
-class MagPruner(Pruner):
+
+class MagPruner(causalpruner.Pruner):
     def __init__(self, model: nn.Module,
                  amount: float = 0.4,
-                 device: Union[str, torch.device] = best_device()):
+                 device: Union[str, torch.device] = causalpruner.best_device()):
         super().__init__(model, device)
         self.amount = amount
 
