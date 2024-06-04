@@ -40,6 +40,11 @@ class Pruner(ABC):
         raise NotImplementedError(
             "Pruner is an abstract class. Use an appropriate derived class.")
 
+    def apply_masks(self) -> None:
+        for param in self.params:
+            module = self.modules_dict[param]
+            prune.remove(module, 'weight')
+
     def remove_masks(self) -> None:
         for _, module in self.modules_dict.items():
             setattr(module, 'weight', module.weight_orig)

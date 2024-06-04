@@ -334,12 +334,13 @@ class SGDPruner(Pruner):
 
 
 def get_sgd_pruner(
-        model: nn.Module, *,
+        model: nn.Module,
+        checkpoint_dir: str,
         momentum: bool = False,
+        *,
         pruner_lr: float = 1e-3,
         prune_threshold: float = 5e-6,
         l1_regularization_coeff: float = 1e-5,
-        checkpoint_dir: str = '',
         causal_weights_batch_size: int = 16,
         causal_weights_num_epochs: int = 10,
         start_clean: bool = True,
