@@ -16,42 +16,27 @@ from torch.utils.data import Dataset, DataLoader
 
 class CausalWeightsTrainer(nn.Module):
 
-    def __init__(self, model_weights: torch.Tensor,
+    def __init__(self,
+                 model_weights: torch.Tensor,
+                 momentum: bool,
                  lr: float,
                  prune_threshold: float,
                  l1_regularization_coeff: float,
                  device: Union[str, torch.device] = best_device()):
         super().__init__()
+        self.momentum = momentum
         self.lr = lr
         self.prune_threshold = prune_threshold
         self.device = device
         self.l1_regularization_coeff = l1_regularization_coeff
         self.flattened_dims = np.prod(model_weights.size(), dtype=int)
-
-    @abstractmethod
-    def get_l1_loss(self) -> torch.Tensor:
-        raise NotImplementedError(
-            "CausalWeightsTrainer is an abstract class.")
-
-    @abstractmethod
-    def get_non_zero_weights(
-            self, prune_threshold: Union[None, float] = None) -> torch.Tensor:
-        raise NotImplementedError(
-            "CausalWeightsTrainer is an abstract class.")
-
-
-class CausalWeightsTrainerVanilla(CausalWeightsTrainer):
-
-    def __init__(self, model_weights: torch.Tensor,
-                 lr: float,
-                 prune_threshold: float,
-                 l1_regularization_coeff: float,
-                 device: Union[str, torch.device] = best_device()):
-        super().__init__(model_weights, lr, prune_threshold,
-                         l1_regularization_coeff, device=device)
+        self.weights_dim_multiplier = 1
+        if self.momentum:
+            self.weights_dim_multiplier = 3
+        self.flattened_dims *= self.weights_dim_multiplier
         self.layer = nn.Linear(
             self.flattened_dims, 1, bias=False, device=self.device)
-        self.optimizer = optim.Adam(self.parameters(), lr=self.lr)
+        self.optimizer = optim.Adam(self.layer.parameters(), lr=self.lr)
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
         return self.layer(X)
@@ -74,67 +59,11 @@ class CausalWeightsTrainerVanilla(CausalWeightsTrainer):
         if prune_threshold is None:
             prune_threshold = self.prune_threshold
         weights = torch.flatten(self.layer.weight.detach().clone())
-        weights_mask = torch.abs(weights) <= prune_threshold
+        if self.momentum:
+            weights = weights.view(self.weights_dim_multiplier, -1)
+        weights_mask = torch.atleast_2d(torch.abs(weights) <= prune_threshold)
+        weights_mask = torch.all(weights_mask, dim=0)
         return torch.where(weights_mask, 0, 1)
-
-
-class CausalWeightsTrainerMomentum(CausalWeightsTrainer):
-
-    def __init__(self, model_weights: torch.Tensor,
-                 lr: float,
-                 prune_threshold: float,
-                 l1_regularization_coeff: float,
-                 device: Union[str, torch.device] = best_device()):
-        super().__init__(model_weights, lr, prune_threshold,
-                         l1_regularization_coeff, device=device)
-
-        self.layer1 = nn.Linear(
-            self.flattened_dims, 1, bias=False, device=self.device)
-        self.layer2 = nn.Linear(
-            self.flattened_dims, 1, bias=False, device=self.device)
-        self.layer3 = nn.Linear(
-            self.flattened_dims, 1, bias=False, device=self.device)
-        self.optimizer = optim.Adam(self.parameters(), lr=self.lr)
-
-    def forward(self, delta_weights_k_0_sq: torch.Tensor,
-                delta_weights_k_1_sq: torch.Tensor,
-                delta_weights_k_0_k_1: torch.Tensor) -> torch.Tensor:
-        return self.layer1(delta_weights_k_0_sq) + self.layer2(
-            delta_weights_k_1_sq) + self.layer3(delta_weights_k_0_k_1)
-
-    def get_l1_loss(self) -> torch.Tensor:
-        return self.l1_regularization_coeff * (torch.norm(
-            self.layer1.weight, p=1) +
-            torch.norm(
-            self.layer2.weight, p=1) +
-            torch.norm(
-            self.layer3.weight, p=1))
-
-    def fit(
-            self, X: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-            Y: torch.Tensor):
-        self.layer1.train()
-        self.layer2.train()
-        self.layer3.train()
-        Y_hat = torch.squeeze(self.forward(X[0], X[1], X[2]), dim=1)
-        Y = torch.flatten(Y)
-        loss = F.mse_loss(Y_hat, Y) + self.get_l1_loss()
-        loss.backward()
-        self.optimizer.step()
-        self.optimizer.zero_grad()
-
-    def get_non_zero_weights(
-            self, prune_threshold: Union[None, float] = None) -> torch.Tensor:
-        if prune_threshold is None:
-            prune_threshold = self.prune_threshold
-        weights1 = torch.flatten(self.layer1.weight.detach().clone())
-        weights1_mask = torch.abs(weights1) <= prune_threshold
-        weights2 = torch.flatten(self.layer2.weight.detach().clone())
-        weights2_mask = torch.abs(weights2) <= prune_threshold
-        weights3 = torch.flatten(self.layer3.weight.detach().clone())
-        weights3_mask = torch.abs(weights3) <= prune_threshold
-        return torch.where(
-            weights1_mask & weights2_mask & weights3_mask, 0, 1)
 
 
 class ParamDataset(Dataset):
@@ -150,8 +79,7 @@ class ParamDataset(Dataset):
     def __len__(self) -> int:
         return self.num_items - 2 if self.momentum else self.num_items - 1
 
-    def __getitem__(self, idx: int) -> tuple[Union[torch.Tensor,
-                                                   tuple[torch.Tensor, torch.Tensor, torch.Tensor]], torch.Tensor]:
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
         delta_param = self.get_delta_param(idx)
         delta_loss = self.get_delta_loss(idx)
         return delta_param, delta_loss
@@ -161,22 +89,22 @@ class ParamDataset(Dataset):
         delta_param = torch.square(delta_param)
         return delta_param
 
-    def get_delta_param_momentum(self, idx: int) -> tuple[torch.Tensor,
-                                                          torch.Tensor, torch.Tensor]:
+    def get_delta_param_momentum(self, idx: int) -> torch.Tensor:
         delta_param_t = self.get_delta(self.param_base_dir, idx)
         delta_param_t_sq = torch.square(delta_param_t)
         delta_param_t_plus_1 = self.get_delta(
             self.param_base_dir, idx + 1)
         delta_param_t_plus_1_sq = torch.square(delta_param_t_plus_1)
         delta_param_t_t_plus_1 = delta_param_t * delta_param_t_plus_1
-        return (
-            delta_param_t_sq, delta_param_t_plus_1_sq, delta_param_t_t_plus_1)
+        return torch.cat(
+            (delta_param_t_sq, delta_param_t_plus_1_sq,
+             delta_param_t_t_plus_1))
 
-    def get_delta_param(self, idx: int) -> Union[torch.Tensor,
-                                                 tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+    def get_delta_param(self, idx: int) -> torch.Tensor:
         if self.momentum:
             return self.get_delta_param_momentum(idx)
-        return self.get_delta_param_vanilla(idx)
+        else:
+            return self.get_delta_param_vanilla(idx)
 
     def get_delta_loss(self, idx: int) -> torch.Tensor:
         if self.momentum:
@@ -223,14 +151,11 @@ class SGDPruner(Pruner):
         self.causal_weights_batch_size = causal_weights_batch_size
         self.causal_weights_num_epochs = causal_weights_num_epochs
 
-        trainer = CausalWeightsTrainerVanilla
-        if self.momentum:
-            trainer = CausalWeightsTrainerMomentum
         self.causal_weights_trainers = nn.ModuleDict()
         for param in self.params:
             module = self.modules_dict[param]
-            self.causal_weights_trainers[param] = trainer(
-                module.weight, pruner_lr, prune_threshold,
+            self.causal_weights_trainers[param] = CausalWeightsTrainer(
+                module.weight, self.momentum, pruner_lr, prune_threshold,
                 l1_regularization_coeff, self.device)
 
         self.checkpoint_dir = checkpoint_dir
