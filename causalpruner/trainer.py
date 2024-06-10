@@ -41,6 +41,7 @@ class TrainerConfig:
     tensorboard_dir: str
     checkpoint_dir: str
     loss_fn: Callable = F.cross_entropy
+    verbose: bool = False
     device: Union[str, torch.device] = best_device()
 
 
@@ -214,6 +215,8 @@ class Trainer:
         return accuracy
 
     def compute_prune_stats(self):
+        if not self.config.verbose:
+            return
         tqdm.write('\n======================================================\n')
         tqdm.write(f'Global Step: {self.global_step + 1}')
         all_params_total = 0

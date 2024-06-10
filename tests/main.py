@@ -80,7 +80,7 @@ def main(args):
         model=model, optimizer=optimizer,
         post_prune_optimizer=post_prune_optimizer, data_config=data_config,
         epoch_config=epoch_config, tensorboard_dir=tensorboard_dir,
-        checkpoint_dir=checkpoint_dir)
+        checkpoint_dir=checkpoint_dir, verbose=args.verbose)
     if args.pruner == 'causalpruner':
         pruner_config = SGDPrunerConfig(
             model=model, pruner='SGDPruner', checkpoint_dir=checkpoint_dir,
@@ -170,6 +170,8 @@ def parse_args() -> argparse.Namespace:
         help="Batch size for causal pruner training")
     parser.add_argument("--prune_amount_mag", type=float,
                         default=0.4, help="Amount")
+    parser.add_argument(
+        "--verbose", type=bool, default=True, help="Output verbosity")
 
     return parser.parse_args()
 
