@@ -1,6 +1,7 @@
-from causalpruner.base import Pruner, best_device
+from causalpruner.base import Pruner, PrunerConfig, best_device
 
 from abc import abstractmethod
+from dataclasses import dataclass
 import os
 from typing import Union
 
@@ -142,6 +143,15 @@ class ParamDataset(Dataset):
         return second_tensor - first_tensor
 
 
+@dataclass
+class SGDPrunerConfig(PrunerConfig):
+    momentum: bool
+    pruner_lr: float
+    prune_threshold: float
+    l1_regularization_coeff: float
+    causal_weights_num_epochs: int
+
+
 class SGDPruner(Pruner):
 
     _SUPPORTED_MODULES = [
@@ -158,37 +168,18 @@ class SGDPruner(Pruner):
                 return True
         return False
 
-    def __init__(
-            self, model: nn.Module, checkpoint_dir: str,
-            momentum: bool, pruner_lr: float, prune_threshold: float,
-            l1_regularization_coeff: float,
-            causal_weights_num_epochs: int,
-            start_clean: bool,
-            device: Union[str, torch.device] = best_device()):
-        super().__init__(model, checkpoint_dir, start_clean, device)
-
-        self.momentum = momentum
-        self.iteration = -1
+    def __init__(self, config: SGDPrunerConfig):
+        super().__init__(config)
         self.counter = 0
-        self.causal_weights_num_epochs = causal_weights_num_epochs
-
+        self.momentum = config.momentum
+        self.causal_weights_num_epochs = config.causal_weights_num_epochs
         self.causal_weights_trainers = nn.ModuleDict()
         for param in self.params:
             module = self.modules_dict[param]
             self.causal_weights_trainers[param] = CausalWeightsTrainer(
-                module.weight, self.momentum, pruner_lr, prune_threshold,
-                l1_regularization_coeff, self.device)
-
-    def start_iteration(self) -> None:
-        self.iteration += 1
-        iteration_name = f'{self.iteration}'
-        loss_dir = os.path.join(self.loss_checkpoint_dir, iteration_name)
-        os.makedirs(loss_dir, exist_ok=True)
-        for param in self.params:
-            param_dir = os.path.join(
-                self.param_checkpoint_dirs[param], iteration_name)
-            os.makedirs(param_dir, exist_ok=True)
-        self.counter = 0
+                module.weight, config.momentum, config.pruner_lr,
+                config.prune_threshold, config.l1_regularization_coeff,
+                self.device)
 
     def provide_loss(self, loss: torch.Tensor) -> None:
         torch.save(loss, self._get_checkpoint_path('loss'))
@@ -237,20 +228,3 @@ class SGDPruner(Pruner):
         for _ in trange(self.causal_weights_num_epochs, leave=False):
             self.causal_weights_trainers[param].fit(
                 delta_params, delta_losses)
-
-
-def get_sgd_pruner(
-        model: nn.Module,
-        checkpoint_dir: str,
-        momentum: bool = False,
-        *,
-        pruner_lr: float = 1e-3,
-        prune_threshold: float = 5e-6,
-        l1_regularization_coeff: float = 1e-5,
-        causal_weights_num_epochs: int = 10,
-        start_clean: bool = True,
-        device=best_device()) -> SGDPruner:
-    assert checkpoint_dir != ''
-    return SGDPruner(model, checkpoint_dir, momentum, pruner_lr,
-                     prune_threshold, l1_regularization_coeff,
-                     causal_weights_num_epochs, start_clean, device)

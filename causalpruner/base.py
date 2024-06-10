@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 import os
 import shutil
 from typing import Union
@@ -15,20 +16,29 @@ def best_device() -> torch.device:
     return device
 
 
+@dataclass
+class PrunerConfig:
+    pruner: str
+    model: nn.Module
+    checkpoint_dir: str
+    start_clean: bool
+    device: Union[str, torch.device]
+
+
 class Pruner(ABC):
 
     @staticmethod
     def is_module_supported(module: nn.Module) -> bool:
         return True
 
-    def __init__(self, model: nn.Module, checkpoint_dir: str,
-                 start_clean: bool,
-                 device: Union[str, torch.device] = best_device()):
+    def __init__(self, config: PrunerConfig):
         super().__init__()
-        self.device = device
+        self.config = config
+        self.device = config.device
+        self.iteration = -1
 
         self.modules_dict = nn.ModuleDict()
-        for name, module in model.named_children():
+        for name, module in config.model.named_children():
             if self.is_module_supported(module):
                 self.modules_dict[name] = module
 
@@ -37,8 +47,8 @@ class Pruner(ABC):
             if hasattr(module, 'weight'):
                 self.params.append(module_name)
 
-        self.checkpoint_dir = checkpoint_dir
-        if start_clean and os.path.exists(self.checkpoint_dir):
+        self.checkpoint_dir = config.checkpoint_dir
+        if config.start_clean and os.path.exists(self.checkpoint_dir):
             shutil.rmtree(self.checkpoint_dir)
         os.makedirs(self.checkpoint_dir, exist_ok=True)
 
@@ -51,6 +61,12 @@ class Pruner(ABC):
                 self.checkpoint_dir, param)
             os.makedirs(self.param_checkpoint_dirs[param],
                         exist_ok=True)
+
+    def __str__(self) -> str:
+        return self.config.pruner
+
+    def __repr__(self) -> str:
+        return str(self)
 
     @abstractmethod
     def compute_masks(self) -> None:
@@ -71,6 +87,9 @@ class Pruner(ABC):
                 if isinstance(hook, prune.BasePruningMethod):
                     del module._forward_pre_hooks[k]
 
+    def provide_loss(self, loss: torch.Tensor) -> None:
+        pass
+
     def start_pruning(self) -> None:
         for param in self.params:
             param_dir = os.path.join(
@@ -79,6 +98,17 @@ class Pruner(ABC):
             module = self.modules_dict[param]
             torch.save(torch.flatten(module.weight.detach().clone()),
                        os.path.join(param_dir, 'ckpt.initial'))
+
+    def start_iteration(self) -> None:
+        self.iteration += 1
+        iteration_name = f'{self.iteration}'
+        loss_dir = os.path.join(self.loss_checkpoint_dir, iteration_name)
+        os.makedirs(loss_dir, exist_ok=True)
+        for param in self.params:
+            param_dir = os.path.join(
+                self.param_checkpoint_dirs[param], iteration_name)
+            os.makedirs(param_dir, exist_ok=True)
+        self.counter = 0
 
     def reset_weights(self) -> None:
         for param in self.params:

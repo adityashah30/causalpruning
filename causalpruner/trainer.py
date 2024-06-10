@@ -1,4 +1,3 @@
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import os
 from typing import Callable, Union
@@ -11,7 +10,7 @@ from torch.utils.data import DataLoader, Dataset
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
 
-from . import get_sgd_pruner, best_device
+from . import Pruner, best_device
 
 
 @dataclass
@@ -45,13 +44,6 @@ class TrainerConfig:
     device: Union[str, torch.device] = best_device()
 
 
-@dataclass
-class PrunerConfig:
-    pruner: str
-    checkpoint_dir: str
-    start_clean: bool
-
-
 class AverageMeter:
 
     def __init__(self):
@@ -70,10 +62,11 @@ class AverageMeter:
         self.avg = self.sum / self.count
 
 
-class Trainer(ABC):
+class Trainer:
 
-    def __init__(self, config: TrainerConfig):
+    def __init__(self, config: TrainerConfig, pruner: Pruner):
         self.config = config
+        self.pruner = pruner
         # Shortcuts for easy access
         self.data_config = config.data_config
         self.epoch_config = config.epoch_config
@@ -105,6 +98,7 @@ class Trainer(ABC):
             persistent_workers=data_config.num_workers > 0)
 
     def run(self):
+        print(f'Pruning method: {self.pruner}')
         self._run_pre_prune()
         self._run_prune()
         self._checkpoint_model('prune')
@@ -136,10 +130,41 @@ class Trainer(ABC):
                 f'Pre-Prune: Epoch {epoch+1}/{epoch_config.num_pre_prune_epochs}' + f'; Loss/Train: {loss_avg.avg:.4f}'
                 + f'; Accuracy/Test: {accuracy:.4f}')
 
-    @abstractmethod
     def _run_prune(self):
-        raise NotImplementedError(
-            'Trainer is an abstract class. Use an appropriate subclass.')
+        config = self.config
+        epoch_config = self.epoch_config
+        self.pruner.start_pruning()
+        for iteration in range(epoch_config.num_prune_iterations):
+            self.pruner.start_iteration()
+            for epoch in range(epoch_config.num_prune_epochs):
+                self.global_step += 1
+                self.pbar.update(1)
+                config.model.train()
+                loss_avg = AverageMeter()
+                for data in self.trainloader:
+                    inputs, labels = data
+                    inputs, labels = inputs.to(
+                        self.device), labels.to(
+                        self.device)
+                    config.optimizer.zero_grad()
+                    outputs = config.model(inputs)
+                    loss = config.loss_fn(outputs, labels)
+                    self.pruner.provide_loss(loss)
+                    loss.backward()
+                    config.optimizer.step()
+                    loss_avg.update(loss.item(), inputs.size(0))
+                self.writer.add_scalar(
+                    'Loss/train', loss_avg.avg, self.global_step)
+                accuracy = self.eval_model()
+                iter_str = f'{iteration+1}/{epoch_config.num_prune_iterations}'
+                epoch_str = f'{epoch+1}/{epoch_config.num_prune_epochs}'
+                self.pbar.set_description(
+                    f'Prune: Iteration {iter_str}; Epoch: {epoch_str}'
+                    + f'; Loss/Train: {loss_avg.avg:.4f}'
+                    + f'; Accuracy/Test: {accuracy:.4f}')
+            self.pruner.compute_masks()
+            self.pruner.reset_weights()
+            self.compute_prune_stats()
 
     def _run_post_prune(self):
         config = self.config
@@ -204,65 +229,3 @@ class Trainer(ABC):
     def _checkpoint_model(self, id: str):
         fname = os.path.join(self.config.checkpoint_dir, f'model.{id}.ckpt')
         torch.save(self.config.model.state_dict(), fname)
-
-
-@dataclass
-class SGDPrunerConfig(PrunerConfig):
-    momentum: bool
-    pruner_lr: float = 1e-3
-    prune_threshold: float = 5e-6
-    l1_regularization_coeff: float = 1e-5
-    causal_weights_num_epochs: int = 500
-
-
-class SGDPrunerTrainer(Trainer):
-
-    def __init__(self, config: TrainerConfig, pruner_config: SGDPrunerConfig):
-        super().__init__(config)
-        self.pruner_config = pruner_config
-        self.pruner = get_sgd_pruner(
-            self.config.model,
-            pruner_config.checkpoint_dir,
-            pruner_config.momentum,
-            pruner_lr=pruner_config.pruner_lr,
-            prune_threshold=pruner_config.prune_threshold,
-            l1_regularization_coeff=pruner_config.l1_regularization_coeff,
-            causal_weights_num_epochs=pruner_config.causal_weights_num_epochs,
-            start_clean=pruner_config.start_clean,
-        )
-
-    def _run_prune(self):
-        config = self.config
-        epoch_config = self.epoch_config
-        self.pruner.start_pruning()
-        for iteration in range(epoch_config.num_prune_iterations):
-            self.pruner.start_iteration()
-            for epoch in range(epoch_config.num_prune_epochs):
-                self.global_step += 1
-                self.pbar.update(1)
-                config.model.train()
-                loss_avg = AverageMeter()
-                for data in self.trainloader:
-                    inputs, labels = data
-                    inputs, labels = inputs.to(
-                        self.device), labels.to(
-                        self.device)
-                    config.optimizer.zero_grad()
-                    outputs = config.model(inputs)
-                    loss = config.loss_fn(outputs, labels)
-                    self.pruner.provide_loss(loss)
-                    loss.backward()
-                    config.optimizer.step()
-                    loss_avg.update(loss.item(), inputs.size(0))
-                self.writer.add_scalar(
-                    'Loss/train', loss_avg.avg, self.global_step)
-                accuracy = self.eval_model()
-                iter_str = f'{iteration+1}/{epoch_config.num_prune_iterations}'
-                epoch_str = f'{epoch+1}/{epoch_config.num_prune_epochs}'
-                self.pbar.set_description(
-                    f'Prune: Iteration {iter_str}; Epoch: {epoch_str}'
-                    + f'; Loss/Train: {loss_avg.avg:.4f}'
-                    + f'; Accuracy/Test: {accuracy:.4f}')
-            self.pruner.compute_masks()
-            self.pruner.reset_weights()
-            self.compute_prune_stats()

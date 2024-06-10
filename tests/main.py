@@ -1,17 +1,28 @@
+# autopep8: off
+import os
+import sys
+
+sys.path.insert(
+    0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
+
+
+import causalpruner
+#autopep on
+
 import argparse
 from datetime import datetime
-import os
 
 import torch.nn as nn
 import torch.optim as optim
 
-import context
-from context import get_trainer
-from causalpruner import DataConfig, EpochConfig, TrainerConfig, SGDPrunerConfig
+from causalpruner import DataConfig, EpochConfig
+from causalpruner import Trainer, TrainerConfig
+from causalpruner import Pruner, PrunerConfig
+from causalpruner import SGDPruner, SGDPrunerConfig
 from causalpruner import best_device
 from models import get_model
 from datasets import get_dataset
-from pruner.mag_pruner import MagPrunerConfig
+from pruner.mag_pruner import MagPruner, MagPrunerConfig
 
 
 def get_optimizer(
@@ -31,6 +42,14 @@ def get_post_prune_optimizer(
         return optim.SGD(model.parameters(), lr=lr)
     raise NotImplementedError(
         f'{name} is not a supported post-prune Optimizier')
+
+
+def get_pruner(pruner_config: PrunerConfig) -> Pruner:
+    if isinstance(pruner_config, SGDPrunerConfig):
+        return SGDPruner(pruner_config)
+    elif isinstance(pruner_config, MagPrunerConfig):
+        return MagPruner(pruner_config)
+    raise NotImplementedError(f'{type(pruner_config)} is not supported yet')
 
 
 def main(args):
@@ -64,16 +83,17 @@ def main(args):
         checkpoint_dir=checkpoint_dir)
     if args.pruner == 'causalpruner':
         pruner_config = SGDPrunerConfig(
-            pruner='SGDPruner', checkpoint_dir=checkpoint_dir,
+            model=model, pruner='SGDPruner', checkpoint_dir=checkpoint_dir,
             start_clean=args.start_clean, momentum=args.momentum > 0,
             pruner_lr=args.pruner_lr, prune_threshold=args.prune_threshold,
             l1_regularization_coeff=args.pruner_l1_regularization_coeff,
-            causal_weights_num_epochs=args.causal_weights_num_epochs)
+            causal_weights_num_epochs=args.causal_weights_num_epochs, device=best_device())
     elif args.pruner == 'magpruner':
-        pruner_config = MagPrunerConfig(
+        pruner_config = MagPrunerConfig(model=model,
             pruner='MagPruner', checkpoint_dir=checkpoint_dir,
-            start_clean=args.start_cean, prune_amount=args.prune_amount_mag)
-    trainer = get_trainer(args.pruner, trainer_config, pruner_config)
+            start_clean=args.start_clean, prune_amount=args.prune_amount_mag, device=best_device())
+    pruner = get_pruner(pruner_config)
+    trainer = Trainer(trainer_config, pruner)
     trainer.run()
 
 
@@ -100,7 +120,7 @@ def parse_args() -> argparse.Namespace:
         '--tensorboard_dir', type=str, default='../tensorboard',
         help="Directory to write tensorboard data")
     parser.add_argument("--batch_size", type=int,
-                        default=8192, help="Batch size")
+                        default=512, help="Batch size")
     parser.add_argument("--num_pre_prune_epochs", type=int, default=10,
                         help="Number of epochs for pretraining")
     parser.add_argument("--num_prune_iterations", type=int, default=10,
