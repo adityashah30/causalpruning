@@ -206,6 +206,7 @@ class SGDPruner(Pruner):
         self.counter = 0
         self.momentum = config.momentum
         self.causal_weights_num_epochs = config.causal_weights_num_epochs
+        self.causal_weights_batch_size = config.causal_weights_batch_size
         self.causal_weights_trainers = nn.ModuleDict()
         for param in self.params:
             module = self.modules_dict[param]
@@ -257,7 +258,8 @@ class SGDPruner(Pruner):
         loss_dir = os.path.join(self.loss_checkpoint_dir, f'{self.iteration}')
         dataset = ParamDataset(param_dir, loss_dir,
                                self.momentum)
-        dataloader = DataLoader(dataset, batch_size=256)
+        dataloader = DataLoader(
+            dataset, batch_size=self.causal_weights_batch_size)
         for _ in trange(self.causal_weights_num_epochs, leave=False):
             for delta_params, delta_losses in dataloader:
                 self.causal_weights_trainers[param].fit(
