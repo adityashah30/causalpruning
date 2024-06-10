@@ -87,7 +87,9 @@ def main(args):
             start_clean=args.start_clean, momentum=args.momentum > 0,
             pruner_lr=args.pruner_lr, prune_threshold=args.prune_threshold,
             l1_regularization_coeff=args.pruner_l1_regularization_coeff,
-            causal_weights_num_epochs=args.causal_weights_num_epochs, device=best_device())
+            causal_weights_num_epochs=args.causal_weights_num_epochs,
+            causal_weights_batch_size=args.causal_weights_batch_size,
+            device=best_device())
     elif args.pruner == 'magpruner':
         pruner_config = MagPrunerConfig(model=model,
             pruner='MagPruner', checkpoint_dir=checkpoint_dir,
@@ -163,6 +165,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--causal_weights_num_epochs', type=int, default=500,
         help="Number of epochs to run causal pruner training")
+    parser.add_argument(
+        '--causal_weights_batch_size', type=int, default=1024,
+        help="Batch size for causal pruner training")
     parser.add_argument("--prune_amount_mag", type=float,
                         default=0.4, help="Amount")
 

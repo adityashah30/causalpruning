@@ -97,6 +97,29 @@ class ParamDataset(Dataset):
         self.num_items = min(len(os.listdir(self.param_base_dir)),
                              len(os.listdir(self.loss_base_dir)))
         self.cache = dict()
+        self._compute_mean_and_std()
+
+    def _compute_mean_and_std(self):
+        param, loss = self.get_item(0)
+        param_total = param
+        loss_total = loss
+        param_sq_total = torch.square(param)
+        loss_sq_total = torch.square(loss)
+        num_items = len(self)
+        for idx in range(1, num_items):
+            param, loss = self.get_item(idx)
+            param_sq, loss_sq = torch.square(param), torch.square(loss)
+            param_total += param
+            loss_total += loss
+            param_sq_total += param_sq
+            loss_sq_total += loss_sq
+        self.param_mean = (param_total / num_items)
+        self.loss_mean = (loss_total / num_items)
+        self.param_std = torch.sqrt(
+            param_sq_total / num_items - torch.square(self.param_mean))
+        self.loss_std = torch.sqrt(
+            loss_sq_total / num_items - torch.square(self.loss_mean))
+
 
     def __len__(self) -> int:
         return self.num_items - 2 if self.momentum else self.num_items - 1
@@ -104,7 +127,12 @@ class ParamDataset(Dataset):
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
         item = self.cache.get(idx)
         if item is None:
-            item = self.get_item(idx)
+            param, loss = self.get_item(idx)
+            param = ((param - self.param_mean.detach()) /
+                     (self.param_std.detach() + 1e-6))
+            loss = ((loss - self.loss_mean.detach()) /
+                    (self.loss_std.detach() + 1e-6))
+            item = (param, loss)
             self.cache[idx] = item
         return item
 
@@ -154,6 +182,7 @@ class SGDPrunerConfig(PrunerConfig):
     prune_threshold: float
     l1_regularization_coeff: float
     causal_weights_num_epochs: int
+    causal_weights_batch_size: int
 
 
 class SGDPruner(Pruner):

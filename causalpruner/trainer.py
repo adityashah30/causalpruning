@@ -105,7 +105,6 @@ class Trainer:
         self.pruner.apply_masks()
         self._run_post_prune()
         self._checkpoint_model('post_prune')
-        self.compute_prune_stats()
 
     def _run_pre_prune(self):
         config = self.config
