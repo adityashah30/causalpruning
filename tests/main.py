@@ -70,7 +70,7 @@ def main(args):
     data_config = DataConfig(
         train_dataset=train_dataset, test_dataset=test_dataset,
         batch_size=args.batch_size, num_workers=args.num_dataset_workers,
-        shuffle=args.shuffle_dataset)
+        shuffle=args.shuffle_dataset, pin_memory=args.pin_memory)
     epoch_config = EpochConfig(
         num_pre_prune_epochs=args.num_pre_prune_epochs,
         num_prune_iterations=args.num_prune_iterations,
@@ -111,11 +111,14 @@ def parse_args() -> argparse.Namespace:
         '--recompute_dataset', type=bool, default=False,
         help="Recomputes dataset transformations if true -- loads existing otherwise")
     parser.add_argument(
-        "--num_dataset_workers", type=int, default=2,
+        "--num_dataset_workers", type=int, default=0,
         help="Number of dataset workers")
     parser.add_argument(
         '--shuffle_dataset', type=bool, default=True,
         help="Whether to shuffle the train and test datasets")
+    parser.add_argument(
+        '--pin_memory', type=bool, default=True,
+        help="Whether to pin the Dataloader memory for train and test datasets")
     parser.add_argument(
         '--tensorboard_dir', type=str, default='../tensorboard',
         help="Directory to write tensorboard data")
@@ -152,10 +155,10 @@ def parse_args() -> argparse.Namespace:
         '--pruner_lr', type=float, default=1e-3,
         help="Learning rate for causal pruner")
     parser.add_argument(
-        '--prune_threshold', type=float, default=5e-6,
+        '--prune_threshold', type=float, default=1e-7,
         help="Weight threshold for causal pruner below which the weights are made zero")
     parser.add_argument(
-        '--pruner_l1_regularization_coeff', type=float, default=1e-5,
+        '--pruner_l1_regularization_coeff', type=float, default=1e-3,
         help="Causal Pruner L1 regularization coefficient")
     parser.add_argument(
         '--causal_weights_num_epochs', type=int, default=500,

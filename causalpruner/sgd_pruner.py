@@ -1,9 +1,8 @@
 from causalpruner.base import Pruner, PrunerConfig, best_device
 
-from abc import abstractmethod
 from dataclasses import dataclass
 import os
-from typing import Union
+from typing import Sequence, Union
 
 import numpy as np
 import torch
@@ -11,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.utils.prune as prune
 import torch.optim as optim
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 from tqdm.auto import trange
 
 
@@ -47,7 +46,7 @@ class CausalWeightsTrainer(nn.Module):
         self.flattened_dims *= self.weights_dim_multiplier
         self.layer = nn.Linear(
             self.flattened_dims, 1, bias=False, device=self.device)
-        self.optimizer = optim.Adam(self.layer.parameters(), lr=self.lr)
+        self.optimizer = optim.SGD(self.layer.parameters(), lr=self.lr)
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
         return self.layer(X)
@@ -58,12 +57,12 @@ class CausalWeightsTrainer(nn.Module):
 
     def fit(self, X: torch.Tensor, Y: torch.Tensor):
         self.layer.train()
+        self.optimizer.zero_grad()
         Y_hat = torch.squeeze(self.forward(X), dim=1)
         Y = torch.flatten(Y)
         loss = F.mse_loss(Y_hat, Y) + self.get_l1_loss()
         loss.backward()
         self.optimizer.step()
-        self.optimizer.zero_grad()
         with torch.no_grad():
             self._prune_small_weights()
 
@@ -91,22 +90,39 @@ class CausalWeightsTrainer(nn.Module):
 class ParamDataset(Dataset):
 
     def __init__(
-            self, param_base_dir: str, loss_base_dir: str, momentum: bool,
-            device: Union[str, torch.device] = best_device()):
+            self, param_base_dir: str, loss_base_dir: str, momentum: bool):
         self.param_base_dir = param_base_dir
         self.loss_base_dir = loss_base_dir
         self.momentum = momentum
-        self.device = device
         self.num_items = min(len(os.listdir(self.param_base_dir)),
                              len(os.listdir(self.loss_base_dir)))
+        self.cache = dict()
 
     def __len__(self) -> int:
         return self.num_items - 2 if self.momentum else self.num_items - 1
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+        item = self.cache.get(idx)
+        if item is None:
+            item = self.get_item(idx)
+            self.cache[idx] = item
+        return item
+
+    def get_item(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
         delta_param = self.get_delta_param(idx)
         delta_loss = self.get_delta_loss(idx)
         return delta_param, delta_loss
+
+    def get_delta_param(self, idx: int) -> torch.Tensor:
+        if self.momentum:
+            return self.get_delta_param_momentum(idx)
+        else:
+            return self.get_delta_param_vanilla(idx)
+
+    def get_delta_loss(self, idx: int) -> torch.Tensor:
+        if self.momentum:
+            idx += 1
+        return self.get_delta(self.loss_base_dir, idx)
 
     def get_delta_param_vanilla(self, idx: int) -> torch.Tensor:
         delta_param = self.get_delta(self.param_base_dir, idx)
@@ -121,25 +137,13 @@ class ParamDataset(Dataset):
         delta_param_t_plus_1_sq = torch.square(delta_param_t_plus_1)
         delta_param_t_t_plus_1 = delta_param_t * delta_param_t_plus_1
         return torch.cat(
-            (delta_param_t_sq, delta_param_t_plus_1_sq,
-             delta_param_t_t_plus_1))
-
-    def get_delta_param(self, idx: int) -> torch.Tensor:
-        if self.momentum:
-            return self.get_delta_param_momentum(idx)
-        else:
-            return self.get_delta_param_vanilla(idx)
-
-    def get_delta_loss(self, idx: int) -> torch.Tensor:
-        if self.momentum:
-            idx += 1
-        return self.get_delta(self.loss_base_dir, idx)
+            (delta_param_t_sq, delta_param_t_plus_1_sq, delta_param_t_t_plus_1))
 
     def get_delta(self, dir: str, idx: int) -> torch.Tensor:
         first_file_path = os.path.join(dir, f'ckpt.{idx}')
-        first_tensor = torch.load(first_file_path).to(self.device)
+        first_tensor = torch.load(first_file_path)
         second_file_path = os.path.join(dir, f'ckpt.{idx + 1}')
-        second_tensor = torch.load(second_file_path).to(self.device)
+        second_tensor = torch.load(second_file_path)
         return second_tensor - first_tensor
 
 
@@ -177,15 +181,18 @@ class SGDPruner(Pruner):
         for param in self.params:
             module = self.modules_dict[param]
             self.causal_weights_trainers[param] = CausalWeightsTrainer(
-                module.weight, config.momentum, config.pruner_lr,
+                module.weight, self.momentum, config.pruner_lr,
                 config.prune_threshold, config.l1_regularization_coeff,
                 self.device)
 
     def provide_loss(self, loss: torch.Tensor) -> None:
+        loss = loss.detach().clone().requires_grad_(False)
         torch.save(loss, self._get_checkpoint_path('loss'))
         for param in self.params:
             module = self.modules_dict[param]
-            torch.save(torch.flatten(module.weight.detach().clone()),
+            weight = module.weight.detach().clone()
+            weight.requires_grad_(False)
+            torch.save(torch.flatten(weight),
                        self._get_checkpoint_path(param))
         self.counter += 1
 
@@ -220,11 +227,10 @@ class SGDPruner(Pruner):
         param_dir = os.path.join(param_dir, f'{self.iteration}')
         loss_dir = os.path.join(self.loss_checkpoint_dir, f'{self.iteration}')
         dataset = ParamDataset(param_dir, loss_dir,
-                               self.momentum, device=self.device)
-        delta_params, delta_losses = zip(
-            *[dataset[idx] for idx in range(len(dataset))])
-        delta_params = torch.stack(delta_params)
-        delta_losses = torch.stack(delta_losses)
+                               self.momentum)
+        dataloader = DataLoader(dataset, batch_size=256)
         for _ in trange(self.causal_weights_num_epochs, leave=False):
-            self.causal_weights_trainers[param].fit(
-                delta_params, delta_losses)
+            for delta_params, delta_losses in dataloader:
+                self.causal_weights_trainers[param].fit(
+                    delta_params, delta_losses)
+        torch.cuda.empty_cache()
