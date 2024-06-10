@@ -2,7 +2,6 @@ from causalpruner.base import Pruner, best_device
 
 from abc import abstractmethod
 import os
-import shutil
 from typing import Union
 
 import numpy as np
@@ -11,7 +10,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.utils.prune as prune
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
+
+
+class ThresholdPruning(prune.BasePruningMethod):
+    PRUNING_TYPE = "unstructured"
+
+    def __init__(self, threshold):
+        self.threshold = threshold
+
+    def compute_mask(self, tensor, default_mask):
+        return torch.abs(tensor) > self.threshold
 
 
 class CausalWeightsTrainer(nn.Module):
@@ -53,6 +62,8 @@ class CausalWeightsTrainer(nn.Module):
         loss.backward()
         self.optimizer.step()
         self.optimizer.zero_grad()
+        with torch.no_grad():
+            self._prune_small_weights()
 
     def get_non_zero_weights(
             self, prune_threshold: Union[None, float] = None) -> torch.Tensor:
@@ -65,14 +76,25 @@ class CausalWeightsTrainer(nn.Module):
         weights_mask = torch.all(weights_mask, dim=0)
         return torch.where(weights_mask, 0, 1)
 
+    def _prune_small_weights(self):
+        params_to_prune = [(self.layer, 'weight')]
+        prune.global_unstructured(
+            params_to_prune,
+            pruning_method=ThresholdPruning,
+            threshold=self.prune_threshold)
+        for module, name in params_to_prune:
+            prune.remove(module, name)
+
 
 class ParamDataset(Dataset):
 
     def __init__(
-            self, param_base_dir: str, loss_base_dir: str, momentum: bool):
+            self, param_base_dir: str, loss_base_dir: str, momentum: bool,
+            device: Union[str, torch.device] = best_device()):
         self.param_base_dir = param_base_dir
         self.loss_base_dir = loss_base_dir
         self.momentum = momentum
+        self.device = device
         self.num_items = min(len(os.listdir(self.param_base_dir)),
                              len(os.listdir(self.loss_base_dir)))
 
@@ -113,9 +135,9 @@ class ParamDataset(Dataset):
 
     def get_delta(self, dir: str, idx: int) -> torch.Tensor:
         first_file_path = os.path.join(dir, f'ckpt.{idx}')
-        first_tensor = torch.load(first_file_path)
+        first_tensor = torch.load(first_file_path).to(self.device)
         second_file_path = os.path.join(dir, f'ckpt.{idx + 1}')
-        second_tensor = torch.load(second_file_path)
+        second_tensor = torch.load(second_file_path).to(self.device)
         return second_tensor - first_tensor
 
 
@@ -139,16 +161,14 @@ class SGDPruner(Pruner):
             self, model: nn.Module, checkpoint_dir: str,
             momentum: bool, pruner_lr: float, prune_threshold: float,
             l1_regularization_coeff: float,
-            causal_weights_batch_size: int,
             causal_weights_num_epochs: int,
             start_clean: bool,
             device: Union[str, torch.device] = best_device()):
-        super().__init__(model, device)
+        super().__init__(model, checkpoint_dir, start_clean, device)
 
         self.momentum = momentum
         self.iteration = -1
         self.counter = 0
-        self.causal_weights_batch_size = causal_weights_batch_size
         self.causal_weights_num_epochs = causal_weights_num_epochs
 
         self.causal_weights_trainers = nn.ModuleDict()
@@ -157,30 +177,6 @@ class SGDPruner(Pruner):
             self.causal_weights_trainers[param] = CausalWeightsTrainer(
                 module.weight, self.momentum, pruner_lr, prune_threshold,
                 l1_regularization_coeff, self.device)
-
-        self.checkpoint_dir = checkpoint_dir
-        if start_clean and os.path.exists(self.checkpoint_dir):
-            shutil.rmtree(self.checkpoint_dir)
-        os.makedirs(self.checkpoint_dir, exist_ok=True)
-
-        self.loss_checkpoint_dir = os.path.join(
-            self.checkpoint_dir, 'loss')
-        os.makedirs(self.loss_checkpoint_dir, exist_ok=True)
-        self.param_checkpoint_dirs = dict()
-        for param in self.params:
-            self.param_checkpoint_dirs[param] = os.path.join(
-                self.checkpoint_dir, param)
-            os.makedirs(self.param_checkpoint_dirs[param],
-                        exist_ok=True)
-
-    def start_pruning(self) -> None:
-        for param in self.params:
-            param_dir = os.path.join(
-                self.param_checkpoint_dirs[param], 'initial')
-            os.makedirs(param_dir, exist_ok=True)
-            module = self.modules_dict[param]
-            torch.save(torch.flatten(module.weight.detach().clone()),
-                       os.path.join(param_dir, 'ckpt.initial'))
 
     def start_iteration(self) -> None:
         self.iteration += 1
@@ -212,29 +208,13 @@ class SGDPruner(Pruner):
             mask = self._get_mask(module_name, pruning_threshold)
             prune.custom_from_mask(module, 'weight', mask)
 
-    def reset_weights(self) -> None:
-        for param in self.params:
-            initial_param_path = os.path.join(
-                self.param_checkpoint_dirs[param],
-                'initial/ckpt.initial')
-            initial_param = torch.load(initial_param_path)
-            with torch.no_grad():
-                weight = self.modules_dict[param].weight
-                initial_param = initial_param.reshape_as(weight)
-                weight.data = initial_param
-
     def _get_mask(
             self, name: str,
             pruning_threshold: Union[float, None] = None) -> torch.Tensor:
         trainer = self.causal_weights_trainers[name]
-        mask_this_iteration = trainer.get_non_zero_weights(pruning_threshold)
-        mask_this_iteration = torch.reshape(
-            mask_this_iteration, self.modules_dict[name].weight.size())
-        module = self.modules_dict[name]
-        if hasattr(module, 'weight_mask'):
-            mask = getattr(module, 'weight_mask')
-            mask_this_iteration = torch.logical_and(mask, mask_this_iteration)
-        return mask_this_iteration
+        mask = trainer.get_non_zero_weights(pruning_threshold)
+        mask = mask.reshape_as(self.modules_dict[name].weight)
+        return mask
 
     def _get_checkpoint_path(self, param_name: str) -> str:
         if param_name == 'loss':
@@ -247,15 +227,15 @@ class SGDPruner(Pruner):
             self, param: str, param_dir: str) -> None:
         param_dir = os.path.join(param_dir, f'{self.iteration}')
         loss_dir = os.path.join(self.loss_checkpoint_dir, f'{self.iteration}')
-        dataset = ParamDataset(param_dir, loss_dir, self.momentum)
-        dataloader = DataLoader(
-            dataset,
-            batch_size=self.causal_weights_batch_size,
-        )
-        for delta_params, delta_losses in dataloader:
-            for _ in range(self.causal_weights_num_epochs):
-                self.causal_weights_trainers[param].fit(
-                    delta_params, delta_losses)
+        dataset = ParamDataset(param_dir, loss_dir,
+                               self.momentum, device=self.device)
+        delta_params, delta_losses = zip(
+            *[dataset[idx] for idx in range(len(dataset))])
+        delta_params = torch.stack(delta_params)
+        delta_losses = torch.stack(delta_losses)
+        for _ in range(self.causal_weights_num_epochs):
+            self.causal_weights_trainers[param].fit(
+                delta_params, delta_losses)
 
 
 def get_sgd_pruner(
@@ -266,12 +246,10 @@ def get_sgd_pruner(
         pruner_lr: float = 1e-3,
         prune_threshold: float = 5e-6,
         l1_regularization_coeff: float = 1e-5,
-        causal_weights_batch_size: int = 16,
         causal_weights_num_epochs: int = 10,
         start_clean: bool = True,
         device=best_device()) -> SGDPruner:
     assert checkpoint_dir != ''
-    return SGDPruner(
-        model, checkpoint_dir, momentum, pruner_lr, prune_threshold,
-        l1_regularization_coeff, causal_weights_batch_size,
-        causal_weights_num_epochs, start_clean, device)
+    return SGDPruner(model, checkpoint_dir, momentum, pruner_lr,
+                     prune_threshold, l1_regularization_coeff,
+                     causal_weights_num_epochs, start_clean, device)
