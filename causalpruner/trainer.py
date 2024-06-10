@@ -98,7 +98,7 @@ class Trainer:
             persistent_workers=data_config.num_workers > 0)
 
     def run(self):
-        print(f'Pruning method: {self.pruner}')
+        tqdm.write(f'Pruning method: {self.pruner}')
         self._run_pre_prune()
         self._run_prune()
         self._checkpoint_model('prune')
