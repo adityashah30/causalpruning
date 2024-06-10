@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+import os
 from typing import Callable, Union
 
 import torch
@@ -8,7 +9,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.tensorboard import SummaryWriter
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from . import get_sgd_pruner, best_device
 
@@ -35,9 +36,11 @@ class EpochConfig:
 class TrainerConfig:
     model: nn.Module
     optimizer: optim.Optimizer
+    post_prune_optimizer: optim.Optimizer
     data_config: DataConfig
     epoch_config: EpochConfig
     tensorboard_dir: str
+    checkpoint_dir: str
     loss_fn: Callable = F.cross_entropy
     device: Union[str, torch.device] = best_device()
 
@@ -104,7 +107,9 @@ class Trainer(ABC):
     def run(self):
         self._run_pre_prune()
         self._run_prune()
+        self._checkpoint_model('prune')
         self._run_post_prune()
+        self._checkpoint_model('post_prune')
         self.compute_prune_stats()
 
     def _run_pre_prune(self):
@@ -128,7 +133,7 @@ class Trainer(ABC):
                 'Loss/train', loss_avg.avg, self.global_step)
             accuracy = self.eval_model()
             self.pbar.set_description(
-                f'Pre-Prune: Epoch {epoch}/{epoch_config.num_pre_prune_epochs}' + f'; Loss/Train: {loss_avg.avg:.4f}'
+                f'Pre-Prune: Epoch {epoch+1}/{epoch_config.num_pre_prune_epochs}' + f'; Loss/Train: {loss_avg.avg:.4f}'
                 + f'; Accuracy/Test: {accuracy:.4f}')
 
     @abstractmethod
@@ -147,18 +152,18 @@ class Trainer(ABC):
             for data in self.trainloader:
                 inputs, labels = data
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
-                config.optimizer.zero_grad()
+                config.post_prune_optimizer.zero_grad()
                 outputs = config.model(inputs)
                 loss = config.loss_fn(outputs, labels)
                 loss.backward()
-                config.optimizer.step()
+                config.post_prune_optimizer.step()
                 loss_avg.update(loss.item(), inputs.size(0))
             self.writer.add_scalar(
                 'Loss/train', loss_avg.avg, self.global_step)
             accuracy = self.eval_model()
             self.pbar.set_description(
                 f'Post-Prune: '
-                + f'Epoch {epoch}/{epoch_config.num_post_prune_epochs}' +
+                + f'Epoch {epoch+1}/{epoch_config.num_post_prune_epochs}' +
                 f'; Loss/Train: {loss_avg.avg:.4f}' +
                 f'; Accuracy/Test: {accuracy:.4f}')
 
@@ -180,15 +185,25 @@ class Trainer(ABC):
         return accuracy
 
     def compute_prune_stats(self):
+        tqdm.write('\n======================================================\n')
+        tqdm.write(f'Global Step: {self.global_step}')
         for (name, param) in self.config.model.named_buffers():
             name = name.rstrip('.weight_mask')
             non_zero = torch.count_nonzero(param)
             total = torch.count_nonzero(torch.ones_like(param))
             pruned = total - non_zero
-            frac = 100 * pruned / total
-            print(f'Name: {name}; Total: {total}; '
-                  f'non-zero: {non_zero}; pruned: {pruned}; '
-                  f'percent: {frac:.4f}%')
+            percent = 100 * pruned / total
+            tqdm.write(f'Name: {name}; Total: {total}; '
+                       f'non-zero: {non_zero}; pruned: {pruned}; '
+                       f'percent: {percent:.2f}%')
+            self.writer.add_scalar(f'{name}/pruned', pruned, self.global_step)
+            self.writer.add_scalar(
+                f'{name}/pruned_percent', percent, self.global_step)
+        tqdm.write('\n======================================================\n')
+
+    def _checkpoint_model(self, id: str):
+        fname = os.path.join(self.config.checkpoint_dir, f'model.{id}.ckpt')
+        torch.save(self.config.model.state_dict(), fname)
 
 
 @dataclass
@@ -242,8 +257,8 @@ class SGDPrunerTrainer(Trainer):
                 self.writer.add_scalar(
                     'Loss/train', loss_avg.avg, self.global_step)
                 accuracy = self.eval_model()
-                iter_str = f'{iteration}/{epoch_config.num_prune_iterations}'
-                epoch_str = f'{epoch}/{epoch_config.num_prune_epochs}'
+                iter_str = f'{iteration+1}/{epoch_config.num_prune_iterations}'
+                epoch_str = f'{epoch+1}/{epoch_config.num_prune_epochs}'
                 self.pbar.set_description(
                     f'Prune: Iteration {iter_str}; Epoch: {epoch_str}'
                     + f'; Loss/Train: {loss_avg.avg:.4f}'

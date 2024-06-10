@@ -67,8 +67,8 @@ class MagPrunerTrainer(Trainer):
                 self.writer.add_scalar(
                     'Loss/train', loss_avg.avg, self.global_step)
                 accuracy = self.eval_model()
-                iter_str = f'{iteration}/{epoch_config.num_prune_iterations}'
-                epoch_str = f'{epoch}/{epoch_config.num_prune_epochs}'
+                iter_str = f'{iteration+1}/{epoch_config.num_prune_iterations}'
+                epoch_str = f'{epoch+1}/{epoch_config.num_prune_epochs}'
                 self.pbar.set_description(
                     f'Prune: Iteration {iter_str}; Epoch: {epoch_str}'
                     + f'; Loss/Train: {loss_avg.avg:.4f}'

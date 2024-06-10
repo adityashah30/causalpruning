@@ -1,5 +1,5 @@
 import argparse
-import datetime
+from datetime import datetime
 import os
 
 import torch.nn as nn
@@ -22,15 +22,32 @@ def get_optimizer(
     raise NotImplementedError(f'{name} is not a supported Optimizier')
 
 
+def get_post_prune_optimizer(
+        name: str, model: nn.Module, lr: float) -> optim.Optimizer:
+    name = name.lower()
+    if name == 'adam':
+        return optim.Adam(model.parameters(), lr=lr)
+    elif name == "sgd":
+        return optim.SGD(model.parameters(), lr=lr)
+    raise NotImplementedError(
+        f'{name} is not a supported post-prune Optimizier')
+
+
 def main(args):
-    now = datetime.datetime.now()
-    date = f'{now.year:04d}{now.month:02d}{now.day:02d}'
-    time = f'{now.hour:04d}{now.minute:02d}{now.second:02d}'
-    identifier = f'{args.pruner}-{date}-{time}'
+    timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    pruner = args.pruner
+    model_name = args.model
+    dataset_name = args.dataset
+    identifier = f"{pruner}_{model_name}_{dataset_name}_{timestamp}"
+    checkpoint_dir = os.path.join(args.checkpoint_dir, identifier)
+    tensorboard_dir = os.path.join(args.tensorboard_dir, identifier)
     train_dataset, test_dataset = get_dataset(
-        args.dataset, args.dataset_root_dir, args.recompute_dataset)
-    model = get_model(args.model, args.dataset).to(best_device())
+        dataset_name, args.dataset_root_dir, args.recompute_dataset)
+    model = get_model(model_name, dataset_name).to(best_device())
     optimizer = get_optimizer(args.optimizer, model, args.lr, args.momentum)
+    post_prune_optimizer = get_post_prune_optimizer(args.post_prune_optimizer,
+                                                    model,
+                                                    args.post_prune_lr)
     data_config = DataConfig(
         train_dataset=train_dataset, test_dataset=test_dataset,
         batch_size=args.batch_size, num_workers=args.num_dataset_workers,
@@ -41,20 +58,20 @@ def main(args):
         num_prune_epochs=args.num_prune_epochs,
         num_post_prune_epochs=args.num_post_prune_epochs)
     trainer_config = TrainerConfig(
-        model=model, optimizer=optimizer, data_config=data_config,
-        epoch_config=epoch_config, tensorboard_dir=os.path.join(
-            args.tensorboard_dir, identifier))
+        model=model, optimizer=optimizer,
+        post_prune_optimizer=post_prune_optimizer, data_config=data_config,
+        epoch_config=epoch_config, tensorboard_dir=tensorboard_dir,
+        checkpoint_dir=checkpoint_dir)
     if args.pruner == 'causalpruner':
         pruner_config = SGDPrunerConfig(
-            pruner='SGDPruner', checkpoint_dir=os.path.join(
-                args.checkpoint_dir, identifier),
+            pruner='SGDPruner', checkpoint_dir=checkpoint_dir,
             start_clean=args.start_clean, momentum=args.momentum > 0,
             pruner_lr=args.pruner_lr, prune_threshold=args.prune_threshold,
             l1_regularization_coeff=args.pruner_l1_regularization_coeff,
             causal_weights_num_epochs=args.causal_weights_num_epochs)
     elif args.pruner == 'magpruner':
         pruner_config = MagPrunerConfig(
-            pruner='MagPruner', checkpoint_dir=args.checkpoint_dir,
+            pruner='MagPruner', checkpoint_dir=checkpoint_dir,
             start_clean=args.start_cean, prune_amount=args.prune_amount_mag)
     trainer = get_trainer(args.pruner, trainer_config, pruner_config)
     trainer.run()
@@ -93,9 +110,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num_post_prune_epochs", type=int, default=100,
                         help="Number of epochs to run post training")
     parser.add_argument("--optimizer", type=str,
-                        default="sgd", help="Optimizier", choices=["sgd"])
+                        default="sgd", help="Optimizer", choices=["sgd"])
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
     parser.add_argument("--momentum", type=float, default=0.0, help="Momentum")
+    parser.add_argument(
+        "--post_prune_optimizer", type=str, default="adam",
+        help="Post Prune Optimizer", choices=["adam", "sgd"])
+    parser.add_argument(
+        "--post_prune_lr", type=float, default=3e-4,
+        help="Learning rate for the post prune optimizer")
     parser.add_argument(
         "--pruner", type=str, default="causalpruner",
         help="Method for pruning", choices=["causalpruner", "magpruner"])

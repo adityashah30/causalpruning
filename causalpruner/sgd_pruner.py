@@ -11,6 +11,7 @@ import torch.nn.functional as F
 import torch.nn.utils.prune as prune
 import torch.optim as optim
 from torch.utils.data import Dataset
+from tqdm.auto import trange
 
 
 class ThresholdPruning(prune.BasePruningMethod):
@@ -233,7 +234,7 @@ class SGDPruner(Pruner):
             *[dataset[idx] for idx in range(len(dataset))])
         delta_params = torch.stack(delta_params)
         delta_losses = torch.stack(delta_losses)
-        for _ in range(self.causal_weights_num_epochs):
+        for _ in trange(self.causal_weights_num_epochs, leave=False):
             self.causal_weights_trainers[param].fit(
                 delta_params, delta_losses)
 
