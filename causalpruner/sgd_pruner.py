@@ -2,7 +2,7 @@ from causalpruner.base import Pruner, PrunerConfig, best_device
 
 from dataclasses import dataclass
 import os
-from typing import Sequence, Union
+from typing import Union
 
 import numpy as np
 import torch
@@ -120,7 +120,6 @@ class ParamDataset(Dataset):
         self.loss_std = torch.sqrt(
             loss_sq_total / num_items - torch.square(self.loss_mean))
 
-
     def __len__(self) -> int:
         return self.num_items - 2 if self.momentum else self.num_items - 1
 
@@ -165,7 +164,8 @@ class ParamDataset(Dataset):
         delta_param_t_plus_1_sq = torch.square(delta_param_t_plus_1)
         delta_param_t_t_plus_1 = delta_param_t * delta_param_t_plus_1
         return torch.cat(
-            (delta_param_t_sq, delta_param_t_plus_1_sq, delta_param_t_t_plus_1))
+            (delta_param_t_sq, delta_param_t_plus_1_sq,
+             delta_param_t_t_plus_1))
 
     def get_delta(self, dir: str, idx: int) -> torch.Tensor:
         first_file_path = os.path.join(dir, f'ckpt.{idx}')
