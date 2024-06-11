@@ -85,7 +85,8 @@ def main(args):
         pruner_config = SGDPrunerConfig(
             model=model, pruner='SGDPruner', checkpoint_dir=checkpoint_dir,
             start_clean=args.start_clean, momentum=args.momentum > 0,
-            pruner_lr=args.pruner_lr, prune_threshold=args.prune_threshold,
+            pruner_lr=args.pruner_lr, amount=args.causal_pruner_prune_amount,
+            iterations=args.num_prune_iterations,
             l1_regularization_coeff=args.pruner_l1_regularization_coeff,
             causal_weights_num_epochs=args.causal_weights_num_epochs,
             causal_weights_batch_size=args.causal_weights_batch_size,
@@ -93,7 +94,7 @@ def main(args):
     elif args.pruner == 'magpruner':
         pruner_config = MagPrunerConfig(model=model,
             pruner='MagPruner', checkpoint_dir=checkpoint_dir,
-            start_clean=args.start_clean, prune_amount=args.prune_amount_mag, device=best_device())
+            start_clean=args.start_clean, amount=args.mag_pruner_prune_amount, device=best_device())
     pruner = get_pruner(pruner_config)
     trainer = Trainer(trainer_config, pruner)
     trainer.run()
@@ -168,7 +169,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--causal_weights_batch_size', type=int, default=1024,
         help="Batch size for causal pruner training")
-    parser.add_argument("--prune_amount_mag", type=float,
+    parser.add_argument('--causal_pruner_prune_amount', type=float,
+                        default=0.6, help="Total number of params to prune during causal pruning")
+    parser.add_argument("--mag_pruner_prune_amount", type=float,
                         default=0.4, help="Amount")
     parser.add_argument(
         "--verbose", type=bool, default=True, help="Output verbosity")

@@ -11,17 +11,7 @@ import torch.nn.functional as F
 import torch.nn.utils.prune as prune
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
-from tqdm.auto import trange
-
-
-class ThresholdPruning(prune.BasePruningMethod):
-    PRUNING_TYPE = "unstructured"
-
-    def __init__(self, threshold):
-        self.threshold = threshold
-
-    def compute_mask(self, tensor, default_mask):
-        return torch.abs(tensor) > self.threshold
+from tqdm.auto import tqdm, trange
 
 
 class CausalWeightsTrainer(nn.Module):
@@ -30,13 +20,17 @@ class CausalWeightsTrainer(nn.Module):
                  model_weights: torch.Tensor,
                  momentum: bool,
                  lr: float,
-                 prune_threshold: float,
+                 amount: float,
+                 iterations: int,
                  l1_regularization_coeff: float,
                  device: Union[str, torch.device] = best_device()):
         super().__init__()
         self.momentum = momentum
         self.lr = lr
-        self.prune_threshold = prune_threshold
+        self.amount = amount
+        self.iterations = iterations
+        self.amount_per_iteration = 1 - \
+            np.exp(np.log(1 - self.amount) / self.iterations)
         self.device = device
         self.l1_regularization_coeff = l1_regularization_coeff
         self.flattened_dims = np.prod(model_weights.size(), dtype=int)
@@ -63,28 +57,25 @@ class CausalWeightsTrainer(nn.Module):
         loss = F.mse_loss(Y_hat, Y) + self.get_l1_loss()
         loss.backward()
         self.optimizer.step()
+
+    def get_mask(self) -> torch.Tensor:
+        return self.layer.weight_mask
+
+    def prune_small_weights(self):
         with torch.no_grad():
-            self._prune_small_weights()
-
-    def get_non_zero_weights(
-            self, prune_threshold: Union[None, float] = None) -> torch.Tensor:
-        if prune_threshold is None:
-            prune_threshold = self.prune_threshold
-        weights = torch.flatten(self.layer.weight.detach().clone())
-        if self.momentum:
-            weights = weights.view(self.weights_dim_multiplier, -1)
-        weights_mask = torch.atleast_2d(torch.abs(weights) <= prune_threshold)
-        weights_mask = torch.all(weights_mask, dim=0)
-        return torch.where(weights_mask, 0, 1)
-
-    def _prune_small_weights(self):
-        params_to_prune = [(self.layer, 'weight')]
-        prune.global_unstructured(
-            params_to_prune,
-            pruning_method=ThresholdPruning,
-            threshold=self.prune_threshold)
-        for module, name in params_to_prune:
-            prune.remove(module, name)
+            weight = self.layer.weight.detach().clone()
+            # Remove all indices where weight is 0
+            total = np.prod(weight.size(), dtype=int)
+            num_non_zero_weights = torch.count_nonzero(weight)
+            num_to_prune = total - num_non_zero_weights
+            num_to_prune += torch.ceil(
+                num_non_zero_weights * self.amount_per_iteration).type(
+                    torch.int32).item()
+            topk = torch.topk(torch.abs(weight).view(-1),
+                              k=num_to_prune, largest=False)
+            mask = torch.ones_like(weight)
+            mask.view(-1)[topk.indices] = 0
+            prune.custom_from_mask(self.layer, 'weight', mask)
 
 
 class ParamDataset(Dataset):
@@ -96,7 +87,6 @@ class ParamDataset(Dataset):
         self.momentum = momentum
         self.num_items = min(len(os.listdir(self.param_base_dir)),
                              len(os.listdir(self.loss_base_dir)))
-        self.cache = dict()
         self._compute_mean_and_std()
 
     def _compute_mean_and_std(self):
@@ -124,16 +114,12 @@ class ParamDataset(Dataset):
         return self.num_items - 2 if self.momentum else self.num_items - 1
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        item = self.cache.get(idx)
-        if item is None:
-            param, loss = self.get_item(idx)
-            param = ((param - self.param_mean.detach()) /
-                     (self.param_std.detach() + 1e-6))
-            loss = ((loss - self.loss_mean.detach()) /
-                    (self.loss_std.detach() + 1e-6))
-            item = (param, loss)
-            self.cache[idx] = item
-        return item
+        param, loss = self.get_item(idx)
+        param = ((param - self.param_mean.detach()) /
+                 (self.param_std.detach() + 1e-6))
+        loss = ((loss - self.loss_mean.detach()) /
+                (self.loss_std.detach() + 1e-6))
+        return (param, loss)
 
     def get_item(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
         delta_param = self.get_delta_param(idx)
@@ -179,7 +165,7 @@ class ParamDataset(Dataset):
 class SGDPrunerConfig(PrunerConfig):
     momentum: bool
     pruner_lr: float
-    prune_threshold: float
+    iterations: int
     l1_regularization_coeff: float
     causal_weights_num_epochs: int
     causal_weights_batch_size: int
@@ -212,16 +198,15 @@ class SGDPruner(Pruner):
             module = self.modules_dict[param]
             self.causal_weights_trainers[param] = CausalWeightsTrainer(
                 module.weight, self.momentum, config.pruner_lr,
-                config.prune_threshold, config.l1_regularization_coeff,
-                self.device)
+                config.amount, config.iterations,
+                config.l1_regularization_coeff, self.device)
 
     def provide_loss(self, loss: torch.Tensor) -> None:
-        loss = loss.detach().clone().requires_grad_(False)
+        loss = loss.detach().clone()
         torch.save(loss, self._get_checkpoint_path('loss'))
         for param in self.params:
             module = self.modules_dict[param]
             weight = module.weight.detach().clone()
-            weight.requires_grad_(False)
             torch.save(torch.flatten(weight),
                        self._get_checkpoint_path(param))
         self.counter += 1
@@ -230,18 +215,15 @@ class SGDPruner(Pruner):
         for param, param_dir in self.param_checkpoint_dirs.items():
             self._train_pruning_weights_for_param(param, param_dir)
 
-    def compute_masks(
-            self, pruning_threshold: Union[float, None] = None) -> None:
+    def compute_masks(self) -> None:
         self.train_pruning_weights()
         for module_name, module in self.modules_dict.items():
-            mask = self._get_mask(module_name, pruning_threshold)
+            mask = self._get_mask(module_name)
             prune.custom_from_mask(module, 'weight', mask)
 
-    def _get_mask(
-            self, name: str,
-            pruning_threshold: Union[float, None] = None) -> torch.Tensor:
+    def _get_mask(self, name: str) -> torch.Tensor:
         trainer = self.causal_weights_trainers[name]
-        mask = trainer.get_non_zero_weights(pruning_threshold)
+        mask = trainer.get_mask()
         mask = mask.reshape_as(self.modules_dict[name].weight)
         return mask
 
@@ -260,8 +242,9 @@ class SGDPruner(Pruner):
                                self.momentum)
         dataloader = DataLoader(
             dataset, batch_size=self.causal_weights_batch_size)
-        for _ in trange(self.causal_weights_num_epochs, leave=False):
-            for delta_params, delta_losses in dataloader:
+        for delta_params, delta_losses in tqdm(dataloader, leave=False):
+            for _ in trange(self.causal_weights_num_epochs, leave=False):
                 self.causal_weights_trainers[param].fit(
                     delta_params, delta_losses)
+        self.causal_weights_trainers[param].prune_small_weights()
         torch.cuda.empty_cache()

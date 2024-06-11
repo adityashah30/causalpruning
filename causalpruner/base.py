@@ -21,6 +21,7 @@ class PrunerConfig:
     pruner: str
     model: nn.Module
     checkpoint_dir: str
+    amount: float
     start_clean: bool
     device: Union[str, torch.device]
 

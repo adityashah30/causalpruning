@@ -5,15 +5,12 @@ import torch.nn.utils.prune as prune
 from causalpruner import PrunerConfig, Pruner
 
 
-@dataclass
-class MagPrunerConfig(PrunerConfig):
-    prune_amount: float = 0.4
+MagPrunerConfig = PrunerConfig
 
 
 class MagPruner(Pruner):
     def __init__(self, config: MagPrunerConfig):
         super().__init__(config)
-        self.prune_amount = config.prune_amount
 
     def compute_masks(self) -> None:
         params_to_prune = []
@@ -22,5 +19,5 @@ class MagPruner(Pruner):
         prune.global_unstructured(
             params_to_prune,
             pruning_method=prune.L1Unstructured,
-            amount=self.prune_amount,
+            amount=self.config.amount,
         )
