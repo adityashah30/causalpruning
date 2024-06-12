@@ -1,4 +1,5 @@
 from causalpruner.base import Pruner, PrunerConfig, best_device
+from causalpruner.lasso_optimizer import LassoSGD
 
 from dataclasses import dataclass
 import os
@@ -9,7 +10,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.utils.prune as prune
-import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from tqdm.auto import trange
 
@@ -29,14 +29,11 @@ class CausalWeightsTrainer(nn.Module):
     def __init__(self,
                  model_weights: torch.Tensor,
                  momentum: bool,
-                 lr: float,
-                 prune_threshold: float,
+                 init_lr: float,
                  l1_regularization_coeff: float,
                  device: Union[str, torch.device] = best_device()):
         super().__init__()
         self.momentum = momentum
-        self.lr = lr
-        self.prune_threshold = prune_threshold
         self.device = device
         self.l1_regularization_coeff = l1_regularization_coeff
         self.flattened_dims = np.prod(model_weights.size(), dtype=int)
@@ -46,45 +43,32 @@ class CausalWeightsTrainer(nn.Module):
         self.flattened_dims *= self.weights_dim_multiplier
         self.layer = nn.Linear(
             self.flattened_dims, 1, bias=False, device=self.device)
-        self.optimizer = optim.SGD(self.layer.parameters(), lr=self.lr)
+        self.optimizer = LassoSGD(self.layer.parameters(
+        ), init_lr=init_lr, alpha=l1_regularization_coeff)
+
+    def reset(self):
+        self.optimizer.reset()
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
         return self.layer(X)
-
-    def get_l1_loss(self) -> torch.Tensor:
-        return self.l1_regularization_coeff * torch.norm(
-            self.layer.weight, p=1)
 
     def fit(self, X: torch.Tensor, Y: torch.Tensor):
         self.layer.train()
         self.optimizer.zero_grad()
         Y_hat = torch.squeeze(self.forward(X), dim=1)
         Y = torch.flatten(Y)
-        loss = F.mse_loss(Y_hat, Y) + self.get_l1_loss()
+        loss = F.mse_loss(Y_hat, Y)
         loss.backward()
         self.optimizer.step()
-        with torch.no_grad():
-            self._prune_small_weights()
 
-    def get_non_zero_weights(
-            self, prune_threshold: Union[None, float] = None) -> torch.Tensor:
-        if prune_threshold is None:
-            prune_threshold = self.prune_threshold
+    def get_non_zero_weights(self) -> torch.Tensor:
         weights = torch.flatten(self.layer.weight.detach().clone())
         if self.momentum:
             weights = weights.view(self.weights_dim_multiplier, -1)
-        weights_mask = torch.atleast_2d(torch.abs(weights) <= prune_threshold)
+        weights_mask = torch.atleast_2d(
+            torch.abs(weights) <= self.l1_regularization_coeff)
         weights_mask = torch.all(weights_mask, dim=0)
         return torch.where(weights_mask, 0, 1)
-
-    def _prune_small_weights(self):
-        params_to_prune = [(self.layer, 'weight')]
-        prune.global_unstructured(
-            params_to_prune,
-            pruning_method=ThresholdPruning,
-            threshold=self.prune_threshold)
-        for module, name in params_to_prune:
-            prune.remove(module, name)
 
 
 class ParamDataset(Dataset):
@@ -178,8 +162,7 @@ class ParamDataset(Dataset):
 @dataclass
 class SGDPrunerConfig(PrunerConfig):
     momentum: bool
-    pruner_lr: float
-    prune_threshold: float
+    pruner_init_lr: float
     l1_regularization_coeff: float
     causal_weights_num_epochs: int
     causal_weights_batch_size: int
@@ -211,9 +194,8 @@ class SGDPruner(Pruner):
         for param in self.params:
             module = self.modules_dict[param]
             self.causal_weights_trainers[param] = CausalWeightsTrainer(
-                module.weight, self.momentum, config.pruner_lr,
-                config.prune_threshold, config.l1_regularization_coeff,
-                self.device)
+                module.weight, self.momentum, config.pruner_init_lr,
+                config.l1_regularization_coeff, device=self.device)
 
     def provide_loss(self, loss: torch.Tensor) -> None:
         loss = loss.detach().clone().requires_grad_(False)
@@ -230,18 +212,15 @@ class SGDPruner(Pruner):
         for param, param_dir in self.param_checkpoint_dirs.items():
             self._train_pruning_weights_for_param(param, param_dir)
 
-    def compute_masks(
-            self, pruning_threshold: Union[float, None] = None) -> None:
+    def compute_masks(self) -> None:
         self.train_pruning_weights()
         for module_name, module in self.modules_dict.items():
-            mask = self._get_mask(module_name, pruning_threshold)
+            mask = self._get_mask(module_name)
             prune.custom_from_mask(module, 'weight', mask)
 
-    def _get_mask(
-            self, name: str,
-            pruning_threshold: Union[float, None] = None) -> torch.Tensor:
+    def _get_mask(self, name: str) -> torch.Tensor:
         trainer = self.causal_weights_trainers[name]
-        mask = trainer.get_non_zero_weights(pruning_threshold)
+        mask = trainer.get_non_zero_weights()
         mask = mask.reshape_as(self.modules_dict[name].weight)
         return mask
 
@@ -260,6 +239,7 @@ class SGDPruner(Pruner):
                                self.momentum)
         dataloader = DataLoader(
             dataset, batch_size=self.causal_weights_batch_size)
+        self.causal_weights_trainers[param].reset()
         for _ in trange(self.causal_weights_num_epochs, leave=False):
             for delta_params, delta_losses in dataloader:
                 self.causal_weights_trainers[param].fit(

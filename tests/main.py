@@ -7,7 +7,7 @@ sys.path.insert(
 
 
 import causalpruner
-#autopep on
+# autopep: on
 
 import argparse
 from datetime import datetime
@@ -85,7 +85,7 @@ def main(args):
         pruner_config = SGDPrunerConfig(
             model=model, pruner='SGDPruner', checkpoint_dir=checkpoint_dir,
             start_clean=args.start_clean, momentum=args.momentum > 0,
-            pruner_lr=args.pruner_lr, prune_threshold=args.prune_threshold,
+            pruner_init_lr=args.pruner_init_lr,
             l1_regularization_coeff=args.pruner_l1_regularization_coeff,
             causal_weights_num_epochs=args.causal_weights_num_epochs,
             causal_weights_batch_size=args.causal_weights_batch_size,
@@ -154,19 +154,16 @@ def parse_args() -> argparse.Namespace:
         '--start_clean', type=bool, default=True,
         help="Controls if the pruner deletes any existing directories when starting")
     parser.add_argument(
-        '--pruner_lr', type=float, default=1e-3,
+        '--pruner_init_lr', type=float, default=1e-3,
         help="Learning rate for causal pruner")
     parser.add_argument(
-        '--prune_threshold', type=float, default=1e-7,
-        help="Weight threshold for causal pruner below which the weights are made zero")
-    parser.add_argument(
-        '--pruner_l1_regularization_coeff', type=float, default=1e-3,
+        '--pruner_l1_regularization_coeff', type=float, default=1e-7,
         help="Causal Pruner L1 regularization coefficient")
     parser.add_argument(
         '--causal_weights_num_epochs', type=int, default=500,
         help="Number of epochs to run causal pruner training")
     parser.add_argument(
-        '--causal_weights_batch_size', type=int, default=1024,
+        '--causal_weights_batch_size', type=int, default=512,
         help="Batch size for causal pruner training")
     parser.add_argument("--prune_amount_mag", type=float,
                         default=0.4, help="Amount")
