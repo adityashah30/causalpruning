@@ -11,17 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.utils.prune as prune
 from torch.utils.data import Dataset, DataLoader
-from tqdm.auto import trange
-
-
-class ThresholdPruning(prune.BasePruningMethod):
-    PRUNING_TYPE = "unstructured"
-
-    def __init__(self, threshold):
-        self.threshold = threshold
-
-    def compute_mask(self, tensor, default_mask):
-        return torch.abs(tensor) > self.threshold
+from tqdm.auto import tqdm
 
 
 class CausalWeightsTrainer(nn.Module):
@@ -43,9 +33,11 @@ class CausalWeightsTrainer(nn.Module):
         self.flattened_dims *= self.weights_dim_multiplier
         self.layer = nn.Linear(
             self.flattened_dims, 1, bias=False, device=self.device)
+        nn.init.normal_(self.layer.weight)
         self.optimizer = LassoSGD(self.layer.parameters(
         ), init_lr=init_lr, alpha=l1_regularization_coeff)
 
+    @torch.no_grad
     def reset(self):
         self.optimizer.reset()
 
@@ -61,8 +53,9 @@ class CausalWeightsTrainer(nn.Module):
         loss.backward()
         self.optimizer.step()
 
+    @torch.no_grad
     def get_non_zero_weights(self) -> torch.Tensor:
-        weights = torch.flatten(self.layer.weight.detach().clone())
+        weights = torch.flatten(self.layer.weight)
         if self.momentum:
             weights = weights.view(self.weights_dim_multiplier, -1)
         weights_mask = torch.atleast_2d(
@@ -80,9 +73,9 @@ class ParamDataset(Dataset):
         self.momentum = momentum
         self.num_items = min(len(os.listdir(self.param_base_dir)),
                              len(os.listdir(self.loss_base_dir)))
-        self.cache = dict()
         self._compute_mean_and_std()
 
+    @torch.no_grad
     def _compute_mean_and_std(self):
         param, loss = self.get_item(0)
         param_total = param
@@ -104,42 +97,45 @@ class ParamDataset(Dataset):
         self.loss_std = torch.sqrt(
             loss_sq_total / num_items - torch.square(self.loss_mean))
 
+    @torch.no_grad
     def __len__(self) -> int:
         return self.num_items - 2 if self.momentum else self.num_items - 1
 
+    @torch.no_grad
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        item = self.cache.get(idx)
-        if item is None:
-            param, loss = self.get_item(idx)
-            param = ((param - self.param_mean.detach()) /
-                     (self.param_std.detach() + 1e-6))
-            loss = ((loss - self.loss_mean.detach()) /
-                    (self.loss_std.detach() + 1e-6))
-            item = (param, loss)
-            self.cache[idx] = item
-        return item
+        param, loss = self.get_item(idx)
+        param = ((param - self.param_mean) /
+                 (self.param_std + 1e-6))
+        loss = ((loss - self.loss_mean) /
+                (self.loss_std + 1e-6))
+        return (param, loss)
 
+    @torch.no_grad
     def get_item(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
         delta_param = self.get_delta_param(idx)
         delta_loss = self.get_delta_loss(idx)
         return delta_param, delta_loss
 
+    @torch.no_grad
     def get_delta_param(self, idx: int) -> torch.Tensor:
         if self.momentum:
             return self.get_delta_param_momentum(idx)
         else:
             return self.get_delta_param_vanilla(idx)
 
+    @torch.no_grad
     def get_delta_loss(self, idx: int) -> torch.Tensor:
         if self.momentum:
             idx += 1
         return self.get_delta(self.loss_base_dir, idx)
 
+    @torch.no_grad
     def get_delta_param_vanilla(self, idx: int) -> torch.Tensor:
         delta_param = self.get_delta(self.param_base_dir, idx)
         delta_param = torch.square(delta_param)
         return delta_param
 
+    @torch.no_grad
     def get_delta_param_momentum(self, idx: int) -> torch.Tensor:
         delta_param_t = self.get_delta(self.param_base_dir, idx)
         delta_param_t_sq = torch.square(delta_param_t)
@@ -151,6 +147,7 @@ class ParamDataset(Dataset):
             (delta_param_t_sq, delta_param_t_plus_1_sq,
              delta_param_t_t_plus_1))
 
+    @torch.no_grad
     def get_delta(self, dir: str, idx: int) -> torch.Tensor:
         first_file_path = os.path.join(dir, f'ckpt.{idx}')
         first_tensor = torch.load(first_file_path)
@@ -197,13 +194,13 @@ class SGDPruner(Pruner):
                 module.weight, self.momentum, config.pruner_init_lr,
                 config.l1_regularization_coeff, device=self.device)
 
+    @torch.no_grad
     def provide_loss(self, loss: torch.Tensor) -> None:
-        loss = loss.detach().clone().requires_grad_(False)
+        loss = loss.clone()
         torch.save(loss, self._get_checkpoint_path('loss'))
         for param in self.params:
             module = self.modules_dict[param]
-            weight = module.weight.detach().clone()
-            weight.requires_grad_(False)
+            weight = module.weight.clone()
             torch.save(torch.flatten(weight),
                        self._get_checkpoint_path(param))
         self.counter += 1
@@ -218,12 +215,14 @@ class SGDPruner(Pruner):
             mask = self._get_mask(module_name)
             prune.custom_from_mask(module, 'weight', mask)
 
+    @torch.no_grad
     def _get_mask(self, name: str) -> torch.Tensor:
         trainer = self.causal_weights_trainers[name]
         mask = trainer.get_non_zero_weights()
         mask = mask.reshape_as(self.modules_dict[name].weight)
         return mask
 
+    @torch.no_grad
     def _get_checkpoint_path(self, param_name: str) -> str:
         if param_name == 'loss':
             path = self.loss_checkpoint_dir
@@ -240,8 +239,12 @@ class SGDPruner(Pruner):
         dataloader = DataLoader(
             dataset, batch_size=self.causal_weights_batch_size)
         self.causal_weights_trainers[param].reset()
-        for _ in trange(self.causal_weights_num_epochs, leave=False):
-            for delta_params, delta_losses in dataloader:
+        for delta_params, delta_losses in dataloader:
+            pbar_train = tqdm(
+                total=self.causal_weights_num_epochs, leave=False)
+            pbar_train.set_description(f'{param}')
+            for _ in range(self.causal_weights_num_epochs):
+                pbar_train.update(1)
                 self.causal_weights_trainers[param].fit(
                     delta_params, delta_losses)
         torch.cuda.empty_cache()

@@ -53,6 +53,8 @@ def get_pruner(pruner_config: PrunerConfig) -> Pruner:
 
 
 def main(args):
+    if args.verbose:
+        print(args)
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     pruner = args.pruner
     model_name = args.model

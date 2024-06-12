@@ -18,6 +18,7 @@ class LassoSGD(Optimizer):
         super().__init__(params, defaults)
         self.reset()
 
+    @torch.no_grad
     def reset(self):
         self.timestep = 0
         for group in self.param_groups:
@@ -30,7 +31,7 @@ class LassoSGD(Optimizer):
                     data, memory_format=torch.preserve_format)
                 param_state['u'] = 0.0
 
-    @_use_grad_for_differentiable
+    @torch.no_grad
     def step(self, closure: Optional[Callable] = None):
         loss = None
         if closure is not None:
