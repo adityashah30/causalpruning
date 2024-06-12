@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.utils.prune as prune
 from torch.utils.data import Dataset, DataLoader
-from tqdm.auto import tqdm
+from tqdm.auto import tqdm, trange
 
 
 class CausalWeightsTrainer(nn.Module):
@@ -21,11 +21,17 @@ class CausalWeightsTrainer(nn.Module):
                  momentum: bool,
                  init_lr: float,
                  l1_regularization_coeff: float,
+                 num_iter: int,
+                 tol: float = 1e-4,
+                 num_iter_no_change: int = 5,
                  device: Union[str, torch.device] = best_device()):
         super().__init__()
         self.momentum = momentum
         self.device = device
         self.l1_regularization_coeff = l1_regularization_coeff
+        self.num_iter = num_iter
+        self.tol = tol
+        self.num_iter_no_change = num_iter_no_change
         self.flattened_dims = np.prod(model_weights.size(), dtype=int)
         self.weights_dim_multiplier = 1
         if self.momentum:
@@ -33,7 +39,7 @@ class CausalWeightsTrainer(nn.Module):
         self.flattened_dims *= self.weights_dim_multiplier
         self.layer = nn.Linear(
             self.flattened_dims, 1, bias=False, device=self.device)
-        nn.init.normal_(self.layer.weight)
+        nn.init.zeros_(self.layer.weight)
         self.optimizer = LassoSGD(self.layer.parameters(
         ), init_lr=init_lr, alpha=l1_regularization_coeff)
 
@@ -44,24 +50,37 @@ class CausalWeightsTrainer(nn.Module):
     def forward(self, X: torch.Tensor) -> torch.Tensor:
         return self.layer(X)
 
-    def fit(self, X: torch.Tensor, Y: torch.Tensor):
+    def fit(self, X: torch.Tensor, Y: torch.Tensor) -> int:
         self.layer.train()
-        self.optimizer.zero_grad()
-        Y_hat = torch.squeeze(self.forward(X), dim=1)
-        Y = torch.flatten(Y)
-        loss = F.mse_loss(Y_hat, Y)
-        loss.backward()
-        self.optimizer.step()
+        X = X.to(self.device)
+        Y = Y.to(self.device)
+        best_loss = np.inf
+        iter_no_change = 0
+        for index in trange(self.num_iter, leave=False):
+            self.optimizer.zero_grad()
+            Y_hat = torch.squeeze(self.forward(X), dim=1)
+            Y = torch.flatten(Y)
+            loss = F.mse_loss(Y_hat, Y)
+            loss.backward()
+            self.optimizer.step()
+            loss = loss.item()
+            if loss > (best_loss - self.tol):
+                iter_no_change += 1
+            else:
+                iter_no_change = 0
+            if loss < best_loss:
+                best_loss = loss
+            if iter_no_change >= self.num_iter_no_change:
+                return index
+        return self.num_iter
 
     @torch.no_grad
     def get_non_zero_weights(self) -> torch.Tensor:
-        weights = torch.flatten(self.layer.weight)
+        mask = self.layer.weight.clone()
         if self.momentum:
-            weights = weights.view(self.weights_dim_multiplier, -1)
-        weights_mask = torch.atleast_2d(
-            torch.abs(weights) <= self.l1_regularization_coeff)
-        weights_mask = torch.all(weights_mask, dim=0)
-        return torch.where(weights_mask, 0, 1)
+            mask = mask.view(self.weights_dim_multiplier, -1)
+        mask = torch.all(mask == 0, dim=0)
+        return torch.where(mask, 0, 1)
 
 
 class ParamDataset(Dataset):
@@ -73,6 +92,7 @@ class ParamDataset(Dataset):
         self.momentum = momentum
         self.num_items = min(len(os.listdir(self.param_base_dir)),
                              len(os.listdir(self.loss_base_dir)))
+        self.cache = dict()
         self._compute_mean_and_std()
 
     @torch.no_grad
@@ -103,12 +123,16 @@ class ParamDataset(Dataset):
 
     @torch.no_grad
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        param, loss = self.get_item(idx)
-        param = ((param - self.param_mean) /
-                 (self.param_std + 1e-6))
-        loss = ((loss - self.loss_mean) /
-                (self.loss_std + 1e-6))
-        return (param, loss)
+        item = self.cache.get(idx)
+        if item is None:
+            param, loss = self.get_item(idx)
+            param = ((param - self.param_mean) /
+                     (self.param_std + 1e-6))
+            loss = ((loss - self.loss_mean) /
+                    (self.loss_std + 1e-6))
+            item = (param, loss)
+            self.cache[idx] = item
+        return item
 
     @torch.no_grad
     def get_item(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -185,22 +209,22 @@ class SGDPruner(Pruner):
         super().__init__(config)
         self.counter = 0
         self.momentum = config.momentum
-        self.causal_weights_num_epochs = config.causal_weights_num_epochs
         self.causal_weights_batch_size = config.causal_weights_batch_size
         self.causal_weights_trainers = nn.ModuleDict()
         for param in self.params:
             module = self.modules_dict[param]
             self.causal_weights_trainers[param] = CausalWeightsTrainer(
                 module.weight, self.momentum, config.pruner_init_lr,
-                config.l1_regularization_coeff, device=self.device)
+                config.l1_regularization_coeff,
+                config.causal_weights_num_epochs, device=self.device)
 
     @torch.no_grad
     def provide_loss(self, loss: torch.Tensor) -> None:
-        loss = loss.clone()
+        loss = loss.detach().clone().cpu()
         torch.save(loss, self._get_checkpoint_path('loss'))
         for param in self.params:
             module = self.modules_dict[param]
-            weight = module.weight.clone()
+            weight = module.weight.detach().clone().cpu()
             torch.save(torch.flatten(weight),
                        self._get_checkpoint_path(param))
         self.counter += 1
@@ -239,12 +263,9 @@ class SGDPruner(Pruner):
         dataloader = DataLoader(
             dataset, batch_size=self.causal_weights_batch_size)
         self.causal_weights_trainers[param].reset()
-        for delta_params, delta_losses in dataloader:
-            pbar_train = tqdm(
-                total=self.causal_weights_num_epochs, leave=False)
-            pbar_train.set_description(f'{param}')
-            for _ in range(self.causal_weights_num_epochs):
-                pbar_train.update(1)
-                self.causal_weights_trainers[param].fit(
-                    delta_params, delta_losses)
+        for index, (delta_params, delta_losses) in enumerate(dataloader):
+            num_steps = self.causal_weights_trainers[param].fit(
+                delta_params, delta_losses)
+            tqdm.write(
+                f'{param}/{index} pruning converged in {num_steps} steps')
         torch.cuda.empty_cache()

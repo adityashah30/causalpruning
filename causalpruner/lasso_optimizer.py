@@ -5,7 +5,6 @@ import torch
 from torch.optim.optimizer import (
     Optimizer,
     ParamsT,
-    _use_grad_for_differentiable,
 )
 
 
@@ -45,20 +44,20 @@ class LassoSGD(Optimizer):
             for p in group['params']:
                 if p.grad is None:
                     continue
-                p_size = torch.numel(p.data)
                 d_p = p.grad.data
                 half_update = -d_p * lr
                 param_state = self.state[p]
                 u = param_state['u']
-                u += lr * alpha / (p_size)
+                u += lr * alpha
                 param_state['u'] = u
                 w = p.data.add_(half_update)
                 z = p.data.detach().clone()
-                a = w < 0
-                zeros = torch.zeros_like(z)
+                zeros = torch.zeros_like(
+                    z, memory_format=torch.preserve_format)
                 q = param_state['q']
-                w[a] = torch.maximum(zeros[a], w[a] - (u + q[a]))
                 a = w > 0
+                w[a] = torch.maximum(zeros[a], w[a] - (u + q[a]))
+                a = w < 0
                 w[a] = torch.minimum(zeros[a], w[a] + (u - q[a]))
                 p.data = w
                 q.add_(w - z)

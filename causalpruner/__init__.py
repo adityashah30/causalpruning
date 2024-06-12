@@ -1,5 +1,6 @@
 from .base import best_device
 from .base import Pruner, PrunerConfig
+from .lasso_optimizer import LassoSGD
 from .sgd_pruner import SGDPruner, SGDPrunerConfig
 from .trainer import AverageMeter
 from .trainer import DataConfig, EpochConfig, TrainerConfig
