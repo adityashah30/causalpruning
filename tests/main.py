@@ -162,7 +162,7 @@ def parse_args() -> argparse.Namespace:
         '--pruner_l1_regularization_coeff', type=float, default=1e-7,
         help="Causal Pruner L1 regularization coefficient")
     parser.add_argument(
-        '--causal_weights_num_epochs', type=int, default=500,
+        '--causal_weights_num_epochs', type=int, default=1000,
         help="Number of epochs to run causal pruner training")
     parser.add_argument(
         '--causal_weights_batch_size', type=int, default=512,

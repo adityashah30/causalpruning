@@ -22,7 +22,7 @@ class CausalWeightsTrainer(nn.Module):
                  init_lr: float,
                  l1_regularization_coeff: float,
                  num_iter: int,
-                 tol: float = 1e-4,
+                 tol: float = 1e-5,
                  num_iter_no_change: int = 5,
                  device: Union[str, torch.device] = best_device()):
         super().__init__()
@@ -76,10 +76,11 @@ class CausalWeightsTrainer(nn.Module):
 
     @torch.no_grad
     def get_non_zero_weights(self) -> torch.Tensor:
-        mask = self.layer.weight.clone()
+        mask = self.layer.weight.detach().clone()
         if self.momentum:
             mask = mask.view(self.weights_dim_multiplier, -1)
-        mask = torch.all(mask == 0, dim=0)
+        mask = torch.all(torch.abs(mask) <=
+                         self.l1_regularization_coeff, dim=0)
         return torch.where(mask, 0, 1)
 
 
@@ -210,13 +211,14 @@ class SGDPruner(Pruner):
         self.counter = 0
         self.momentum = config.momentum
         self.causal_weights_batch_size = config.causal_weights_batch_size
+        self.causal_weights_num_epochs = config.causal_weights_num_epochs
         self.causal_weights_trainers = nn.ModuleDict()
         for param in self.params:
             module = self.modules_dict[param]
             self.causal_weights_trainers[param] = CausalWeightsTrainer(
                 module.weight, self.momentum, config.pruner_init_lr,
                 config.l1_regularization_coeff,
-                config.causal_weights_num_epochs, device=self.device)
+                self.causal_weights_num_epochs, device=self.device)
 
     @torch.no_grad
     def provide_loss(self, loss: torch.Tensor) -> None:
@@ -266,6 +268,11 @@ class SGDPruner(Pruner):
         for index, (delta_params, delta_losses) in enumerate(dataloader):
             num_steps = self.causal_weights_trainers[param].fit(
                 delta_params, delta_losses)
-            tqdm.write(
-                f'{param}/{index} pruning converged in {num_steps} steps')
+            if num_steps == self.causal_weights_num_epochs:
+                tqdm.write(f'{param}/{index} failed to converge in ' +
+                           f'{num_steps} steps. Consider increasing ' +
+                           '--causal_weights_num_epochs')
+            else:
+                tqdm.write(
+                    f'{param}/{index} pruning converged in {num_steps} steps')
         torch.cuda.empty_cache()
