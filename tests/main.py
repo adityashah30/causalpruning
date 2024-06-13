@@ -156,7 +156,7 @@ def parse_args() -> argparse.Namespace:
         '--start_clean', type=bool, default=True,
         help="Controls if the pruner deletes any existing directories when starting")
     parser.add_argument(
-        '--pruner_init_lr', type=float, default=1e-3,
+        '--pruner_init_lr', type=float, default=1e-2,
         help="Learning rate for causal pruner")
     parser.add_argument(
         '--pruner_l1_regularization_coeff', type=float, default=1e-7,

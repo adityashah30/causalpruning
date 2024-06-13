@@ -22,7 +22,7 @@ class CausalWeightsTrainer(nn.Module):
                  init_lr: float,
                  l1_regularization_coeff: float,
                  num_iter: int,
-                 tol: float = 1e-5,
+                 tol: float = 1e-4,
                  num_iter_no_change: int = 5,
                  device: Union[str, torch.device] = best_device()):
         super().__init__()
@@ -40,8 +40,9 @@ class CausalWeightsTrainer(nn.Module):
         self.layer = nn.Linear(
             self.flattened_dims, 1, bias=False, device=self.device)
         nn.init.zeros_(self.layer.weight)
-        self.optimizer = LassoSGD(self.layer.parameters(
-        ), init_lr=init_lr, alpha=l1_regularization_coeff)
+        self.optimizer = LassoSGD(
+            self.layer.parameters(),
+            init_lr=init_lr, alpha=l1_regularization_coeff)
 
     @torch.no_grad
     def reset(self):
@@ -79,25 +80,46 @@ class CausalWeightsTrainer(nn.Module):
         mask = self.layer.weight.detach().clone()
         if self.momentum:
             mask = mask.view(self.weights_dim_multiplier, -1)
-        mask = torch.all(torch.abs(mask) <=
-                         self.l1_regularization_coeff, dim=0)
+        mask = torch.all(mask == 0, dim=0)
         return torch.where(mask, 0, 1)
 
 
 class ParamDataset(Dataset):
 
     def __init__(
-            self, param_base_dir: str, loss_base_dir: str, momentum: bool):
+            self,
+            param_base_dir: str,
+            loss_base_dir: str,
+            momentum: bool,
+            preload: bool = True):
         self.param_base_dir = param_base_dir
         self.loss_base_dir = loss_base_dir
         self.momentum = momentum
         self.num_items = min(len(os.listdir(self.param_base_dir)),
                              len(os.listdir(self.loss_base_dir)))
-        self.cache = dict()
+        self.preload = preload
+        if preload:
+            self.preload_data()
         self._compute_mean_and_std()
 
     @torch.no_grad
+    def preload_data(self):
+        params_list, loss_list = [], []
+        for index in range(len(self)):
+            param, loss = self.get_item(index)
+            params_list.append(param)
+            loss_list.append(loss)
+        self.preloaded_params = torch.stack(params_list)
+        self.preloaded_losses = torch.stack(loss_list)
+
+    @torch.no_grad
     def _compute_mean_and_std(self):
+        if self.preload:
+            self.param_mean = torch.mean(self.preloaded_params, dim=0)
+            self.param_std = torch.std(self.preloaded_params, dim=0) + 1e-6
+            self.loss_mean = torch.mean(self.preloaded_losses, dim=0)
+            self.loss_std = torch.std(self.preloaded_losses, dim=0) + 1e-6
+            return
         param, loss = self.get_item(0)
         param_total = param
         loss_total = loss
@@ -114,9 +136,9 @@ class ParamDataset(Dataset):
         self.param_mean = (param_total / num_items)
         self.loss_mean = (loss_total / num_items)
         self.param_std = torch.sqrt(
-            param_sq_total / num_items - torch.square(self.param_mean))
+            param_sq_total / num_items - torch.square(self.param_mean)) + 1e-6
         self.loss_std = torch.sqrt(
-            loss_sq_total / num_items - torch.square(self.loss_mean))
+            loss_sq_total / num_items - torch.square(self.loss_mean)) + 1e-6
 
     @torch.no_grad
     def __len__(self) -> int:
@@ -124,16 +146,16 @@ class ParamDataset(Dataset):
 
     @torch.no_grad
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        item = self.cache.get(idx)
-        if item is None:
+        if self.preload:
+            param = self.preloaded_params[idx]
+            loss = self.preloaded_losses[idx]
+        else:
             param, loss = self.get_item(idx)
-            param = ((param - self.param_mean) /
-                     (self.param_std + 1e-6))
-            loss = ((loss - self.loss_mean) /
-                    (self.loss_std + 1e-6))
-            item = (param, loss)
-            self.cache[idx] = item
-        return item
+        param = ((param - self.param_mean) /
+                 (self.param_std))
+        loss = ((loss - self.loss_mean) /
+                (self.loss_std))
+        return (param, loss)
 
     @torch.no_grad
     def get_item(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -263,7 +285,7 @@ class SGDPruner(Pruner):
         dataset = ParamDataset(param_dir, loss_dir,
                                self.momentum)
         dataloader = DataLoader(
-            dataset, batch_size=self.causal_weights_batch_size)
+            dataset, batch_size=len(dataset))
         self.causal_weights_trainers[param].reset()
         for index, (delta_params, delta_losses) in enumerate(dataloader):
             num_steps = self.causal_weights_trainers[param].fit(

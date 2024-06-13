@@ -10,6 +10,11 @@ from torch.optim.optimizer import (
 
 class LassoSGD(Optimizer):
 
+    '''
+    This implements the truncated gradient approach by
+    [Tsuruoka, Y., Tsujii, J., and Ananiadou, S., 2009].
+    '''
+
     def __init__(self, params: ParamsT, init_lr: float = 1e-3,
                  time_decay: float = 0.25, alpha: float = 1e-7):
         defaults = dict(
@@ -45,6 +50,7 @@ class LassoSGD(Optimizer):
                 if p.grad is None:
                     continue
                 d_p = p.grad.data
+                d_p = torch.clamp(d_p, -1e12, 1e12)
                 half_update = -d_p * lr
                 param_state = self.state[p]
                 u = param_state['u']
