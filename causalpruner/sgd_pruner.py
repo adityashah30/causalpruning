@@ -17,6 +17,7 @@ from tqdm.auto import tqdm, trange
 class CausalWeightsTrainer(nn.Module):
 
     def __init__(self,
+                 name: str,
                  model_weights: torch.Tensor,
                  momentum: bool,
                  init_lr: float,
@@ -26,6 +27,7 @@ class CausalWeightsTrainer(nn.Module):
                  num_iter_no_change: int = 5,
                  device: Union[str, torch.device] = best_device()):
         super().__init__()
+        self.name = name
         self.momentum = momentum
         self.device = device
         self.l1_regularization_coeff = l1_regularization_coeff
@@ -55,16 +57,23 @@ class CausalWeightsTrainer(nn.Module):
         self.layer.train()
         X = X.to(self.device)
         Y = Y.to(self.device)
+        num_items = X.shape[0]
         best_loss = np.inf
         iter_no_change = 0
-        for index in trange(self.num_iter, leave=False):
-            self.optimizer.zero_grad()
-            Y_hat = torch.squeeze(self.forward(X), dim=1)
-            Y = torch.flatten(Y)
-            loss = F.mse_loss(Y_hat, Y)
-            loss.backward()
-            self.optimizer.step()
-            loss = loss.item()
+        pbar_train = tqdm(total=self.num_iter * num_items, leave=False)
+        pbar_train.set_description(f'Pruning {self.name}')
+        for iter in range(self.num_iter):
+            sumloss = 0.0
+            indices = torch.randperm(num_items)
+            for idx in indices:
+                pbar_train.update(1)
+                self.optimizer.zero_grad()
+                output = self.forward(X[idx])
+                label = Y[idx].view(-1)
+                loss = 0.5 * F.mse_loss(output, label, reduction='sum')
+                loss.backward()
+                self.optimizer.step()
+                sumloss += loss.item()
             if loss > (best_loss - self.tol):
                 iter_no_change += 1
             else:
@@ -72,7 +81,7 @@ class CausalWeightsTrainer(nn.Module):
             if loss < best_loss:
                 best_loss = loss
             if iter_no_change >= self.num_iter_no_change:
-                return index
+                return iter
         return self.num_iter
 
     @torch.no_grad
@@ -238,7 +247,7 @@ class SGDPruner(Pruner):
         for param in self.params:
             module = self.modules_dict[param]
             self.causal_weights_trainers[param] = CausalWeightsTrainer(
-                module.weight, self.momentum, config.pruner_init_lr,
+                param, module.weight, self.momentum, config.pruner_init_lr,
                 config.l1_regularization_coeff,
                 self.causal_weights_num_epochs, device=self.device)
 

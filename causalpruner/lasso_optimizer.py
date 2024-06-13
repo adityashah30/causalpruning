@@ -30,9 +30,8 @@ class LassoSGD(Optimizer):
                 if not p.requires_grad:
                     continue
                 param_state = self.state[p]
-                data = p.data
                 param_state['q'] = torch.zeros_like(
-                    data, memory_format=torch.preserve_format)
+                    p, memory_format=torch.preserve_format)
                 param_state['u'] = 0.0
 
     @torch.no_grad
@@ -49,23 +48,21 @@ class LassoSGD(Optimizer):
             for p in group['params']:
                 if p.grad is None:
                     continue
-                d_p = p.grad.data
+                d_p = p.grad
                 d_p = torch.clamp(d_p, -1e12, 1e12)
-                half_update = -d_p * lr
+                p.add_(d_p, alpha=-lr)
+                z = p.detach().clone()
+                zeros = torch.zeros_like(
+                    z, memory_format=torch.preserve_format)
                 param_state = self.state[p]
                 u = param_state['u']
                 u += lr * alpha
                 param_state['u'] = u
-                w = p.data.add_(half_update)
-                z = p.data.detach().clone()
-                zeros = torch.zeros_like(
-                    z, memory_format=torch.preserve_format)
                 q = param_state['q']
-                a = w > 0
-                w[a] = torch.maximum(zeros[a], w[a] - (u + q[a]))
-                a = w < 0
-                w[a] = torch.minimum(zeros[a], w[a] + (u - q[a]))
-                p.data = w
-                q.add_(w - z)
+                a = z > 0
+                p[a] = torch.maximum(zeros[a], p[a] - (u + q[a]))
+                a = z < 0
+                p[a] = torch.minimum(zeros[a], p[a] + (u - q[a]))
+                q.add_(p - z)
                 param_state['q'] = q
         return loss
