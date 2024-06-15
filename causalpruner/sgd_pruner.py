@@ -1,96 +1,18 @@
-from causalpruner.base import Pruner, PrunerConfig, best_device
-from causalpruner.lasso_optimizer import LassoSGD
-
+import copy
 from dataclasses import dataclass
 import os
-from typing import Union
 
-import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.nn.utils.prune as prune
 from torch.utils.data import Dataset, DataLoader
-from tqdm.auto import tqdm, trange
+from tqdm.auto import tqdm
 
-
-class CausalWeightsTrainer(nn.Module):
-
-    def __init__(self,
-                 name: str,
-                 model_weights: torch.Tensor,
-                 momentum: bool,
-                 init_lr: float,
-                 l1_regularization_coeff: float,
-                 num_iter: int,
-                 tol: float = 1e-4,
-                 num_iter_no_change: int = 5,
-                 device: Union[str, torch.device] = best_device()):
-        super().__init__()
-        self.name = name
-        self.momentum = momentum
-        self.device = device
-        self.l1_regularization_coeff = l1_regularization_coeff
-        self.num_iter = num_iter
-        self.tol = tol
-        self.num_iter_no_change = num_iter_no_change
-        self.flattened_dims = np.prod(model_weights.size(), dtype=int)
-        self.weights_dim_multiplier = 1
-        if self.momentum:
-            self.weights_dim_multiplier = 3
-        self.flattened_dims *= self.weights_dim_multiplier
-        self.layer = nn.Linear(
-            self.flattened_dims, 1, bias=False, device=self.device)
-        nn.init.zeros_(self.layer.weight)
-        self.optimizer = LassoSGD(
-            self.layer.parameters(),
-            init_lr=init_lr, alpha=l1_regularization_coeff)
-
-    @torch.no_grad
-    def reset(self):
-        self.optimizer.reset()
-
-    def forward(self, X: torch.Tensor) -> torch.Tensor:
-        return self.layer(X)
-
-    def fit(self, X: torch.Tensor, Y: torch.Tensor) -> int:
-        self.layer.train()
-        X = X.to(self.device)
-        Y = Y.to(self.device)
-        num_items = X.shape[0]
-        best_loss = np.inf
-        iter_no_change = 0
-        pbar_train = tqdm(total=self.num_iter * num_items, leave=False)
-        pbar_train.set_description(f'Pruning {self.name}')
-        for iter in range(self.num_iter):
-            sumloss = 0.0
-            indices = torch.randperm(num_items)
-            for idx in indices:
-                pbar_train.update(1)
-                self.optimizer.zero_grad()
-                output = self.forward(X[idx])
-                label = Y[idx].view(-1)
-                loss = 0.5 * F.mse_loss(output, label, reduction='sum')
-                loss.backward()
-                self.optimizer.step()
-                sumloss += loss.item()
-            if loss > (best_loss - self.tol):
-                iter_no_change += 1
-            else:
-                iter_no_change = 0
-            if loss < best_loss:
-                best_loss = loss
-            if iter_no_change >= self.num_iter_no_change:
-                return iter
-        return self.num_iter
-
-    @torch.no_grad
-    def get_non_zero_weights(self) -> torch.Tensor:
-        mask = self.layer.weight.detach().clone()
-        if self.momentum:
-            mask = mask.view(self.weights_dim_multiplier, -1)
-        mask = torch.all(mask == 0, dim=0)
-        return torch.where(mask, 0, 1)
+from causalpruner.base import Pruner, PrunerConfig, best_device
+from causalpruner.causal_weights_trainer import (
+    CausalWeightsTrainerConfig,
+    get_causal_weights_trainer,
+)
 
 
 class ParamDataset(Dataset):
@@ -214,11 +136,7 @@ class ParamDataset(Dataset):
 
 @dataclass
 class SGDPrunerConfig(PrunerConfig):
-    momentum: bool
-    pruner_init_lr: float
-    l1_regularization_coeff: float
-    causal_weights_num_epochs: int
-    causal_weights_batch_size: int
+    trainer_config: CausalWeightsTrainerConfig
 
 
 class SGDPruner(Pruner):
@@ -240,16 +158,15 @@ class SGDPruner(Pruner):
     def __init__(self, config: SGDPrunerConfig):
         super().__init__(config)
         self.counter = 0
-        self.momentum = config.momentum
-        self.causal_weights_batch_size = config.causal_weights_batch_size
-        self.causal_weights_num_epochs = config.causal_weights_num_epochs
-        self.causal_weights_trainers = nn.ModuleDict()
-        for param in self.params:
-            module = self.modules_dict[param]
-            self.causal_weights_trainers[param] = CausalWeightsTrainer(
-                param, module.weight, self.momentum, config.pruner_init_lr,
-                config.l1_regularization_coeff,
-                self.causal_weights_num_epochs, device=self.device)
+        self.trainer_config = config.trainer_config
+        self.causal_weights_trainers = dict()
+        for param_name in self.params:
+            trainer_config_copy = copy.deepcopy(self.trainer_config)
+            trainer_config_copy.param_name = param_name
+            module = self.modules_dict[param_name]
+            trainer = get_causal_weights_trainer(
+                trainer_config_copy, self.device, module.weight)
+            self.causal_weights_trainers[param_name] = trainer
 
     @torch.no_grad
     def provide_loss(self, loss: torch.Tensor) -> None:
@@ -262,19 +179,23 @@ class SGDPruner(Pruner):
                        self._get_checkpoint_path(param))
         self.counter += 1
 
-    def train_pruning_weights(self) -> None:
-        for param, param_dir in self.param_checkpoint_dirs.items():
-            self._train_pruning_weights_for_param(param, param_dir)
-
-    def compute_masks(self) -> None:
+    def compute_masks(self):
         self.train_pruning_weights()
         for module_name, module in self.modules_dict.items():
             mask = self._get_mask(module_name)
             prune.custom_from_mask(module, 'weight', mask)
 
-    @torch.no_grad
+    def train_pruning_weights(self) -> None:
+        params = self.param_checkpoint_dirs.items()
+        pbar_pruning = tqdm(total=len(params), leave=False)
+        for param, param_dir in params:
+            pbar_pruning.set_description(param)
+            self._train_pruning_weights_for_param(param, param_dir)
+            pbar_pruning.update(1)
+
     def _get_mask(self, name: str) -> torch.Tensor:
         trainer = self.causal_weights_trainers[name]
+        mask = trainer.get_non_zero_weights()
         mask = trainer.get_non_zero_weights()
         mask = mask.reshape_as(self.modules_dict[name].weight)
         return mask
@@ -292,18 +213,15 @@ class SGDPruner(Pruner):
         param_dir = os.path.join(param_dir, f'{self.iteration}')
         loss_dir = os.path.join(self.loss_checkpoint_dir, f'{self.iteration}')
         dataset = ParamDataset(param_dir, loss_dir,
-                               self.momentum)
-        dataloader = DataLoader(
-            dataset, batch_size=len(dataset))
-        self.causal_weights_trainers[param].reset()
-        for index, (delta_params, delta_losses) in enumerate(dataloader):
-            num_steps = self.causal_weights_trainers[param].fit(
-                delta_params, delta_losses)
-            if num_steps == self.causal_weights_num_epochs:
-                tqdm.write(f'{param}/{index} failed to converge in ' +
-                           f'{num_steps} steps. Consider increasing ' +
-                           '--causal_weights_num_epochs')
-            else:
-                tqdm.write(
-                    f'{param}/{index} pruning converged in {num_steps} steps')
+                               self.trainer_config.momentum)
+        dataloader = DataLoader(dataset, batch_size=len(dataset))
+        delta_params, delta_losses = next(iter(dataloader))
+        num_iters = self.causal_weights_trainers[param].fit(
+            delta_params, delta_losses)
+        if num_iters == self.trainer_config.max_iter:
+            tqdm.write(f'{param} pruning failed to converge in ' +
+                       f'{num_iters} steps. Consider increasing ' +
+                       '--causal_weights_num_epochs')
+        else:
+            tqdm.write(f'{param} pruning converged in {num_iters} steps')
         torch.cuda.empty_cache()
