@@ -3,35 +3,45 @@ import torch
 import torchvision.datasets as datasets
 
 from torchvision.transforms import v2
+from tqdm.auto import trange
 
 
 class TransformedCIFAR10(datasets.CIFAR10):
 
     _TRAIN_FPATH = 'train.pth'
     _TEST_FPATH = 'test.pth'
-    _TRANSFORM_TRAIN = v2.Compose(
-        [v2.RandomCrop(32, padding=4),
-         v2.RandomHorizontalFlip(),
-         v2.ToImage(),
-         v2.ToDtype(torch.float32, scale=True),
-         v2.Normalize(
-            (0.4914, 0.4822, 0.4465),
-             (0.2023, 0.1994, 0.2010))])
-    _TRANSFORM_TEST = v2.Compose(
-        [v2.ToImage(),
-         v2.ToDtype(torch.float32, scale=True),
-         v2.Normalize(
-            (0.4914, 0.4822, 0.4465),
-             (0.2023, 0.1994, 0.2010))])
+    _TRANSFORM_TRAIN = [v2.RandomHorizontalFlip(),
+                        v2.ToImage(),
+                        v2.ToDtype(torch.float32, scale=True),
+                        v2.Normalize(
+        mean=(0.4914, 0.4822, 0.4465),
+        std=(0.2023, 0.1994, 0.2010))]
+    _TRANSFORM_TEST = [v2.ToImage(),
+                       v2.ToDtype(torch.float32, scale=True),
+                       v2.Normalize(
+        mean=(0.4914, 0.4822, 0.4465),
+        std=(0.2023, 0.1994, 0.2010))]
 
-    def __init__(self, root: str, train: bool = True, recompute: bool = False):
+    def __init__(
+            self, root: str, size: int, train: bool = True,
+            recompute: bool = False):
+        transforms = self._TRANSFORM_TEST
+        if train:
+            transforms = self._TRANSFORM_TRAIN
+        if size != 32:
+            transforms = [v2.Resize(size)] + transforms
+        transforms = v2.Compose(transforms)
+        cifar10_root = os.path.join(root, 'cifar10')
+
         super().__init__(
-            root, train, download=True,
-            transform=self._TRANSFORM_TRAIN
-            if train else self._TRANSFORM_TEST)
+            cifar10_root, train, download=True,
+            transform=transforms)
+
+        size_dir = os.path.join(self.root, f'{size}x{size}')
+        os.makedirs(size_dir, exist_ok=True)
 
         file_path = self._TRAIN_FPATH if train else self._TEST_FPATH
-        self.fpath = os.path.join(self.root, file_path)
+        self.fpath = os.path.join(size_dir, file_path)
 
         if recompute or not os.path.exists(self.fpath):
             self.transform_and_save()
@@ -43,7 +53,7 @@ class TransformedCIFAR10(datasets.CIFAR10):
     def transform_and_save(self):
         data = []
         targets = []
-        for idx in range(super().__len__()):
+        for idx in trange(super().__len__()):
             datum, target = super().__getitem__(idx)
             data.append(datum)
             targets.append(target)

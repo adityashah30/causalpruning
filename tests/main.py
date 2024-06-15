@@ -74,7 +74,7 @@ def main(args):
     checkpoint_dir = os.path.join(args.checkpoint_dir, identifier)
     tensorboard_dir = os.path.join(args.tensorboard_dir, identifier)
     train_dataset, test_dataset = get_dataset(
-        dataset_name, args.dataset_root_dir, args.recompute_dataset)
+        dataset_name, model_name, args.dataset_root_dir, args.recompute_dataset)
     model = get_model(model_name, dataset_name).to(best_device())
     optimizer = get_optimizer(args.optimizer, model, args.lr, args.momentum)
     post_prune_optimizer = get_post_prune_optimizer(args.post_prune_optimizer,
@@ -126,7 +126,7 @@ def main(args):
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Causal Pruning')
 
-    parser.add_argument('--model', type=str,
+    parser.add_argument('--model', type=str, choices=['alexnet', 'lenet'],
                         default='lenet', help='Model name')
     parser.add_argument('--dataset', type=str,
                         default='cifar10', help='Dataset name')

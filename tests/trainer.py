@@ -236,14 +236,14 @@ class Trainer:
             self.writer.add_scalar(
                 f'{name}/pruned_percent', percent, self.global_step)
         all_params_non_zero = all_params_total - all_params_pruned
-        all_params_percent = 100 * all_params_pruned / all_params_total
+        all_params_percent = 100 * all_params_pruned / (all_params_total + 1e-6)
         tqdm.write(f'Name: All; Total: {all_params_total}; '
                    f'non-zero: {all_params_non_zero}; pruned: {all_params_pruned}; '
                    f'percent: {all_params_percent:.2f}%')
         self.writer.add_scalar(
             f'all/pruned', all_params_pruned, self.global_step)
         self.writer.add_scalar(
-            f'{name}/pruned_percent', all_params_percent, self.global_step)
+            f'all/pruned_percent', all_params_percent, self.global_step)
         tqdm.write('\n======================================================\n')
 
     def _checkpoint_model(self, id: str):
