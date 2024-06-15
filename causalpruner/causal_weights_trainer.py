@@ -99,6 +99,7 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
             init_lr=self.init_lr, alpha=self.l1_regularization_coeff)
 
     def fit(self, X: torch.Tensor, Y: torch.Tensor) -> int:
+        self.optimizer.reset()
         self.layer.train()
         X = X.to(self.device)
         Y = Y.to(self.device)

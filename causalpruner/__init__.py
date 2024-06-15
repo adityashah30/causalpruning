@@ -13,10 +13,3 @@ from .sgd_pruner import (
     SGDPruner, 
     SGDPrunerConfig,
 )
-from .trainer import (
-    AverageMeter,
-    DataConfig,
-    EpochConfig,
-    Trainer,
-    TrainerConfig,
-)

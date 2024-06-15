@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader, Dataset
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
 
-from . import Pruner, best_device
+from causalpruner import Pruner, best_device
 
 
 @dataclass

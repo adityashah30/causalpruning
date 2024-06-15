@@ -15,14 +15,10 @@ import torch.optim as optim
 
 from causalpruner import (
     CausalWeightsTrainerConfig,
-    DataConfig, 
-    EpochConfig,
     Pruner,
     PrunerConfig,
     SGDPruner,
     SGDPrunerConfig,
-    Trainer,
-    TrainerConfig,
     best_device,
 )
 from models import get_model
@@ -30,6 +26,13 @@ from datasets import get_dataset
 from pruner.mag_pruner import (
     MagPruner, 
     MagPrunerConfig,
+)
+from trainer import (
+    DataConfig, 
+    EpochConfig,
+    Pruner,
+    Trainer,
+    TrainerConfig,
 )
 
 
