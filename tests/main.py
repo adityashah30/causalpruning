@@ -108,6 +108,8 @@ def main(args):
             pruner='SGDPruner', 
             checkpoint_dir=checkpoint_dir,
             start_clean=args.start_clean, 
+            batch_size=args.causal_pruner_batch_size,
+            preload=args.causal_pruner_preload,
             trainer_config=causal_weights_trainer_config, 
             device=best_device())
     elif args.pruner == 'magpruner':
@@ -134,16 +136,19 @@ def parse_args() -> argparse.Namespace:
         '--dataset_root_dir', type=str, default='../data',
         help='Directory to download datasets')
     parser.add_argument(
-        '--recompute_dataset', type=bool, default=False,
+        '--recompute_dataset', action=argparse.BooleanOptionalAction,
+        default=False,
         help='Recomputes dataset transformations if true -- loads existing otherwise')
     parser.add_argument(
         '--num_dataset_workers', type=int, default=0,
         help='Number of dataset workers')
     parser.add_argument(
-        '--shuffle_dataset', type=bool, default=True,
+        '--shuffle_dataset', action=argparse.BooleanOptionalAction,
+        default=True,
         help='Whether to shuffle the train and test datasets')
     parser.add_argument(
-        '--pin_memory', type=bool, default=True,
+        '--pin_memory', action=argparse.BooleanOptionalAction,
+        default=True,
         help='Whether to pin the Dataloader memory for train and test datasets')
     parser.add_argument(
         '--tensorboard_dir', type=str, default='../tensorboard',
@@ -175,7 +180,8 @@ def parse_args() -> argparse.Namespace:
         '--checkpoint_dir', type=str, default='../checkpoints',
         help='Checkpoint dir to write model weights and losses')
     parser.add_argument(
-        '--start_clean', type=bool, default=True,
+        '--start_clean', action=argparse.BooleanOptionalAction,
+        default=True,
         help='Controls if the pruner deletes any existing directories when starting')
     parser.add_argument(
         '--causal_pruner_init_lr', type=float, default=1e-2,
@@ -193,13 +199,21 @@ def parse_args() -> argparse.Namespace:
         '--causal_pruner_num_iter_no_change', type=int, default=5,
         help='Number of iterations with no loss improvement before declaring convergence')
     parser.add_argument(
+        '--causal_pruner_batch_size', type=int, default=-1,
+        help='Batch size for causal pruner training. Use -1 to use the entire dataset')
+    parser.add_argument(
+        '--causal_pruner_preload', action=argparse.BooleanOptionalAction,
+        default=True,
+        help='Controls whether to preload the params and losses dataset. Turn off for very large models')
+    parser.add_argument(
         '--causal_pruner_backend', type=str, default='sklearn', 
         choices=['sklearn', 'torch'],
         help='Causal weights trainer backend')
     parser.add_argument('--mag_pruner_amount', type=float,
                         default=0.4, help='Magnitude pruning fraction')
     parser.add_argument(
-        '--verbose', type=bool, default=True, help='Output verbosity')
+        '--verbose', action=argparse.BooleanOptionalAction, 
+        default=True, help='Output verbosity')
 
     return parser.parse_args()
 

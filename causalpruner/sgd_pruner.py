@@ -136,6 +136,8 @@ class ParamDataset(Dataset):
 
 @dataclass
 class SGDPrunerConfig(PrunerConfig):
+    preload: bool
+    batch_size: int
     trainer_config: CausalWeightsTrainerConfig
 
 
@@ -170,11 +172,11 @@ class SGDPruner(Pruner):
 
     @torch.no_grad
     def provide_loss(self, loss: torch.Tensor) -> None:
-        loss = loss.detach().clone().cpu()
+        loss = loss.detach().cpu()
         torch.save(loss, self._get_checkpoint_path('loss'))
         for param in self.params:
             module = self.modules_dict[param]
-            weight = module.weight.detach().clone().cpu()
+            weight = module.weight.detach().cpu()
             torch.save(torch.flatten(weight),
                        self._get_checkpoint_path(param))
         self.counter += 1
@@ -213,15 +215,23 @@ class SGDPruner(Pruner):
         param_dir = os.path.join(param_dir, f'{self.iteration}')
         loss_dir = os.path.join(self.loss_checkpoint_dir, f'{self.iteration}')
         dataset = ParamDataset(param_dir, loss_dir,
-                               self.trainer_config.momentum)
-        dataloader = DataLoader(dataset, batch_size=len(dataset))
-        delta_params, delta_losses = next(iter(dataloader))
-        num_iters = self.causal_weights_trainers[param].fit(
-            delta_params, delta_losses)
+                               self.trainer_config.momentum,
+                               preload=self.config.preload)
+        batch_size = self.config.batch_size
+        if batch_size < 0:
+            batch_size = len(dataset)
+        dataloader = DataLoader(
+            dataset, batch_size=batch_size, pin_memory=True)
+        trainer = self.causal_weights_trainers[param]
+        trainer.reset()
+        pbar_prune = tqdm(dataloader, leave=False)
+        for idx, (delta_params, delta_losses) in enumerate(pbar_prune):
+            pbar_prune.set_description(f'Pruning {param}/{idx}')
+            num_iters = trainer.fit(delta_params, delta_losses)
+            torch.cuda.empty_cache()
         if num_iters == self.trainer_config.max_iter:
             tqdm.write(f'{param} pruning failed to converge in ' +
                        f'{num_iters} steps. Consider increasing ' +
                        '--causal_weights_num_epochs')
         else:
             tqdm.write(f'{param} pruning converged in {num_iters} steps')
-        torch.cuda.empty_cache()

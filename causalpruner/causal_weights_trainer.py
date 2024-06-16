@@ -42,6 +42,10 @@ class CausalWeightsTrainer(ABC):
             self.weights_dim_multiplier = 3
 
     @abstractmethod
+    def reset(self):
+        raise NotImplementedError('Use the sklearn or pytorch version')
+
+    @abstractmethod
     def fit(self, X: torch.Tensor, Y: torch.Tensor) -> int:
         raise NotImplementedError('Use the sklearn or pytorch version')
 
@@ -57,9 +61,7 @@ class CausalWeightsTrainerSklearn(CausalWeightsTrainer):
                  device: Union[str, torch.device]):
         super().__init__(config, device)
 
-    def fit(self, X: torch.Tensor, Y: torch.Tensor) -> int:
-        X = X.detach().cpu().numpy()
-        Y = Y.detach().cpu().numpy()
+    def reset(self):
         self.trainer = SGDRegressor(
             loss='squared_error',
             penalty='l1',
@@ -69,7 +71,11 @@ class CausalWeightsTrainerSklearn(CausalWeightsTrainer):
             tol=self.loss_tol,
             n_iter_no_change=self.num_iter_no_change,
             shuffle=True)
-        self.trainer.fit(X, Y)
+
+    def fit(self, X: torch.Tensor, Y: torch.Tensor) -> int:
+        X = X.detach().cpu().numpy()
+        Y = Y.detach().cpu().numpy()
+        self.trainer.partial_fit(X, Y)
         return self.trainer.n_iter_
 
     def get_non_zero_weights(self) -> torch.Tensor:
@@ -97,22 +103,21 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
         self.optimizer = LassoSGD(
             self.layer.parameters(),
             init_lr=self.init_lr, alpha=self.l1_regularization_coeff)
+        
+    def reset(self):
+        self.optimizer.reset()
 
     def fit(self, X: torch.Tensor, Y: torch.Tensor) -> int:
-        self.optimizer.reset()
         self.layer.train()
-        X = X.to(self.device)
-        Y = Y.to(self.device)
+        X = X.to(device=self.device)
+        Y = Y.to(device=self.device)
         num_items = X.shape[0]
         best_loss = np.inf
         iter_no_change = 0
-        pbar_train = tqdm(total=self.max_iter * num_items, leave=False)
-        pbar_train.set_description(f'Pruning {self.param_name}')
         for iter in range(self.max_iter):
             sumloss = 0.0
             indices = torch.randperm(num_items)
             for idx in indices:
-                pbar_train.update(1)
                 self.optimizer.zero_grad()
                 output = self.layer(X[idx])
                 label = Y[idx].view(-1)

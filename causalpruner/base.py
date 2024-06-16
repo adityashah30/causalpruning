@@ -25,11 +25,24 @@ class PrunerConfig:
     device: Union[str, torch.device]
 
 
+
+
 class Pruner(ABC):
 
     @staticmethod
     def is_module_supported(module: nn.Module) -> bool:
         return True
+    
+    @staticmethod
+    def get_children(model: nn.Module, root: str) -> dict[str, nn.Module]:
+        children = dict()
+        for name, module in model.named_children():
+            root_name = root + '_' + name
+            if isinstance(module, nn.Sequential):
+                children.update(Pruner.get_children(module, root_name))
+            else:
+                children[root_name] = module
+        return children
 
     def __init__(self, config: PrunerConfig):
         super().__init__()
@@ -38,7 +51,8 @@ class Pruner(ABC):
         self.iteration = -1
 
         self.modules_dict = nn.ModuleDict()
-        for name, module in config.model.named_children():
+        children = self.get_children(self.config.model, 'model')
+        for name, module in children.items():
             if self.is_module_supported(module):
                 self.modules_dict[name] = module
 
