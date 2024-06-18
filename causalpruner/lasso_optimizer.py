@@ -30,6 +30,9 @@ class LassoSGD(Optimizer):
                 if not p.requires_grad:
                     continue
                 param_state = self.state[p]
+                if 'q' in param_state:
+                    del param_state['q']
+                    torch.cuda.empty_cache()
                 param_state['q'] = torch.zeros_like(
                     p, memory_format=torch.preserve_format)
                 param_state['u'] = 0.0

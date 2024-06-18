@@ -47,9 +47,9 @@ class ParamDataset(Dataset):
     def _compute_mean_and_std(self):
         if self.preload:
             self.param_mean = torch.mean(self.preloaded_params, dim=0)
-            self.param_std = torch.std(self.preloaded_params, dim=0) + 1e-6
+            self.param_std = torch.std(self.preloaded_params, dim=0)
             self.loss_mean = torch.mean(self.preloaded_losses, dim=0)
-            self.loss_std = torch.std(self.preloaded_losses, dim=0) + 1e-6
+            self.loss_std = torch.std(self.preloaded_losses, dim=0)
             return
         param, loss = self.get_item(0)
         param_total = param
@@ -67,9 +67,9 @@ class ParamDataset(Dataset):
         self.param_mean = (param_total / num_items)
         self.loss_mean = (loss_total / num_items)
         self.param_std = torch.sqrt(
-            param_sq_total / num_items - torch.square(self.param_mean)) + 1e-6
+            param_sq_total / num_items - torch.square(self.param_mean))
         self.loss_std = torch.sqrt(
-            loss_sq_total / num_items - torch.square(self.loss_mean)) + 1e-6
+            loss_sq_total / num_items - torch.square(self.loss_mean))
 
     @torch.no_grad
     def __len__(self) -> int:

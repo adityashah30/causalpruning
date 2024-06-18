@@ -97,15 +97,15 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
         super().__init__(config, device)
         self.flattened_dims = np.prod(model_weights.size(), dtype=int)
         self.flattened_dims *= self.weights_dim_multiplier
+    
+    @torch.no_grad
+    def reset(self):
         self.layer = nn.Linear(
             self.flattened_dims, 1, bias=False, device=self.device)
         nn.init.zeros_(self.layer.weight)
         self.optimizer = LassoSGD(
             self.layer.parameters(),
             init_lr=self.init_lr, alpha=self.l1_regularization_coeff)
-        
-    def reset(self):
-        self.optimizer.reset()
 
     def fit(self, X: torch.Tensor, Y: torch.Tensor) -> int:
         self.layer.train()
