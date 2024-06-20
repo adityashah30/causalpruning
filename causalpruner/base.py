@@ -25,14 +25,12 @@ class PrunerConfig:
     device: Union[str, torch.device]
 
 
-
-
 class Pruner(ABC):
 
     @staticmethod
     def is_module_supported(module: nn.Module) -> bool:
         return True
-    
+
     @staticmethod
     def get_children(model: nn.Module, root: str) -> dict[str, nn.Module]:
         children = dict()
@@ -87,11 +85,13 @@ class Pruner(ABC):
         raise NotImplementedError(
             "Pruner is an abstract class. Use an appropriate derived class.")
 
+    @torch.no_grad
     def apply_masks(self) -> None:
         for param in self.params:
             module = self.modules_dict[param]
             prune.remove(module, 'weight')
 
+    @torch.no_grad
     def remove_masks(self) -> None:
         for _, module in self.modules_dict.items():
             setattr(module, 'weight', module.weight_orig)
@@ -104,6 +104,7 @@ class Pruner(ABC):
     def provide_loss(self, loss: torch.Tensor) -> None:
         pass
 
+    @torch.no_grad
     def start_pruning(self) -> None:
         for param in self.params:
             param_dir = os.path.join(
@@ -113,6 +114,7 @@ class Pruner(ABC):
             torch.save(torch.flatten(module.weight.detach().clone()),
                        os.path.join(param_dir, 'ckpt.initial'))
 
+    @torch.no_grad
     def start_iteration(self) -> None:
         self.iteration += 1
         iteration_name = f'{self.iteration}'
@@ -124,13 +126,13 @@ class Pruner(ABC):
             os.makedirs(param_dir, exist_ok=True)
         self.counter = 0
 
+    @torch.no_grad
     def reset_weights(self) -> None:
         for param in self.params:
             initial_param_path = os.path.join(
                 self.param_checkpoint_dirs[param],
                 'initial/ckpt.initial')
             initial_param = torch.load(initial_param_path)
-            with torch.no_grad():
-                weight = self.modules_dict[param].weight
-                initial_param = initial_param.reshape_as(weight)
-                weight.data = initial_param
+            weight = self.modules_dict[param].weight
+            initial_param = initial_param.reshape_as(weight)
+            weight.data = initial_param

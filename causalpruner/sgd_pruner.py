@@ -1,6 +1,9 @@
+import concurrent.futures
+from concurrent.futures import ProcessPoolExecutor
 import copy
 from dataclasses import dataclass
 import os
+import shutil
 
 import torch
 import torch.nn as nn
@@ -138,6 +141,7 @@ class ParamDataset(Dataset):
 class SGDPrunerConfig(PrunerConfig):
     preload: bool
     batch_size: int
+    delete_checkpoint_dir_after_training: bool
     trainer_config: CausalWeightsTrainerConfig
 
 
@@ -162,6 +166,8 @@ class SGDPruner(Pruner):
         self.counter = 0
         self.trainer_config = config.trainer_config
         self.causal_weights_trainers = dict()
+        self.checkpointer = ProcessPoolExecutor()
+        self.checkpoint_futures = []
         for param_name in self.params:
             trainer_config_copy = copy.deepcopy(self.trainer_config)
             trainer_config_copy.param_name = param_name
@@ -171,14 +177,23 @@ class SGDPruner(Pruner):
             self.causal_weights_trainers[param_name] = trainer
 
     @torch.no_grad
+    def start_iteration(self):
+        super().start_iteration()
+        self.checkpoint_futures = []
+
+    @torch.no_grad
     def provide_loss(self, loss: torch.Tensor) -> None:
         loss = loss.detach().cpu()
-        torch.save(loss, self._get_checkpoint_path('loss'))
+        future = self.checkpointer.submit(
+            torch.save, loss, self._get_checkpoint_path('loss'))
+        self.checkpoint_futures.append(future)
         for param in self.params:
             module = self.modules_dict[param]
             weight = module.weight.detach().cpu()
-            torch.save(torch.flatten(weight),
-                       self._get_checkpoint_path(param))
+            weight = torch.flatten(weight)
+            future = self.checkpointer.submit(
+                torch.save, weight, self._get_checkpoint_path(param))
+            self.checkpoint_futures.append(future)
         self.counter += 1
 
     def compute_masks(self):
@@ -190,19 +205,29 @@ class SGDPruner(Pruner):
     def train_pruning_weights(self) -> None:
         params = self.param_checkpoint_dirs.items()
         pbar_pruning = tqdm(total=len(params), leave=False)
+        concurrent.futures.wait(self.checkpoint_futures)
         for param, param_dir in params:
             pbar_pruning.set_description(param)
-            self._train_pruning_weights_for_param(param, param_dir)
             pbar_pruning.update(1)
+            self._train_pruning_weights_for_param(param, param_dir)
+        self._delete_checkpoint_dirs()
+
+    def _delete_checkpoint_dirs(self):
+        if self.config.delete_checkpoint_dir_after_training:
+            loss_dir = os.path.join(
+                self.loss_checkpoint_dir, f'{self.iteration}')
+            shutil.rmtree(loss_dir)
+            for param_dir in self.param_checkpoint_dirs.values():
+                param_dir = os.path.join(param_dir, f'{self.iteration}')
+                shutil.rmtree(param_dir)
 
     def _get_mask(self, name: str) -> torch.Tensor:
         trainer = self.causal_weights_trainers[name]
         mask = trainer.get_non_zero_weights()
-        mask = trainer.get_non_zero_weights()
         mask = mask.reshape_as(self.modules_dict[name].weight)
         return mask
 
-    @torch.no_grad
+    @ torch.no_grad
     def _get_checkpoint_path(self, param_name: str) -> str:
         if param_name == 'loss':
             path = self.loss_checkpoint_dir

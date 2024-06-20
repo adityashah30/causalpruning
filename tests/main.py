@@ -111,6 +111,7 @@ def main(args):
             batch_size=args.causal_pruner_batch_size,
             preload=args.causal_pruner_preload,
             trainer_config=causal_weights_trainer_config, 
+            delete_checkpoint_dir_after_training=args.delete_checkpoint_dir_after_training,
             device=best_device())
     elif args.pruner == 'magpruner':
         pruner_config = MagPrunerConfig(
@@ -128,8 +129,15 @@ def main(args):
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Causal Pruning')
 
+    # Model args
     parser.add_argument('--model', type=str, choices=['alexnet', 'lenet'],
                         default='lenet', help='Model name')
+    parser.add_argument('--convergence_train_loss', type=float, default=5e-3, 
+                        help='Considers the model converged when train loss reaches this value.')
+    parser.add_argument('--max_train_epochs', type=int, default=100,
+                        help='Maximum number of epochs for train the model')
+    
+    # Dataset args
     parser.add_argument('--dataset', type=str,
                         default='cifar10', help='Dataset name')
     parser.add_argument(
@@ -174,6 +182,10 @@ def parse_args() -> argparse.Namespace:
         '--post_prune_lr', type=float, default=3e-4,
         help='Learning rate for the post prune optimizer')
     parser.add_argument(
+        '--prune', action=argparse.BooleanOptionalAction, 
+        default=True, 
+        help='Prunes the model and then trains it if set to true -- else just trains it until convergence')
+    parser.add_argument(
         '--pruner', type=str, default='causalpruner',
         help='Method for pruning', choices=['causalpruner', 'magpruner'])
     parser.add_argument(
@@ -205,6 +217,11 @@ def parse_args() -> argparse.Namespace:
         '--causal_pruner_preload', action=argparse.BooleanOptionalAction,
         default=True,
         help='Controls whether to preload the params and losses dataset. Turn off for very large models')
+    parser.add_argument(
+        '--delete_checkpoint_dir_after_training', 
+        action=argparse.BooleanOptionalAction, 
+        default=True, 
+        help='Deletes the checkpoint directory once params are trained. Used to save space.')
     parser.add_argument(
         '--causal_pruner_backend', type=str, default='sklearn', 
         choices=['sklearn', 'torch'],
