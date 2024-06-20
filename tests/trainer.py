@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 import os
-from typing import Callable, Union
+from typing import Callable, Optional, Union
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -28,14 +29,16 @@ class EpochConfig:
     num_pre_prune_epochs: int
     num_prune_iterations: int
     num_prune_epochs: int
-    num_post_prune_epochs: int
+    num_train_epochs: int
 
 
 @dataclass
 class TrainerConfig:
     model: nn.Module
-    optimizer: optim.Optimizer
-    post_prune_optimizer: optim.Optimizer
+    prune_optimizer: optim.Optimizer
+    train_optimizer: optim.Optimizer
+    train_convergence_loss_tolerance: float
+    train_loss_num_epochs_no_change: int
     data_config: DataConfig
     epoch_config: EpochConfig
     tensorboard_dir: str
@@ -65,7 +68,7 @@ class AverageMeter:
 
 class Trainer:
 
-    def __init__(self, config: TrainerConfig, pruner: Pruner):
+    def __init__(self, config: TrainerConfig, pruner: Optional[Pruner] = None):
         self.config = config
         self.pruner = pruner
         # Shortcuts for easy access
@@ -74,12 +77,13 @@ class Trainer:
         self.total_epochs = (self.epoch_config.num_pre_prune_epochs
                              + self.epoch_config.num_prune_iterations *
                              self.epoch_config.num_prune_epochs
-                             + self.epoch_config.num_post_prune_epochs)
+                             + self.epoch_config.num_train_epochs)
         self.device = config.device
         self.pbar = tqdm(total=self.total_epochs)
         self.global_step = -1
         self.writer = SummaryWriter(config.tensorboard_dir)
         self._make_dataloaders()
+        os.makedirs(config.checkpoint_dir, exist_ok=True)
 
     def __del__(self):
         self.pbar.close()
@@ -99,13 +103,11 @@ class Trainer:
             persistent_workers=data_config.num_workers > 0)
 
     def run(self):
-        tqdm.write(f'Pruning method: {self.pruner}')
-        self._run_pre_prune()
-        self._run_prune()
-        self._checkpoint_model('prune')
-        self.pruner.apply_masks()
-        self._run_post_prune()
-        self._checkpoint_model('post_prune')
+        if self.pruner is not None:
+            tqdm.write(f'Pruning method: {self.pruner}')
+            self._run_pre_prune()
+            self._run_prune()
+        self._run_training()
 
     def _run_pre_prune(self):
         config = self.config
@@ -116,19 +118,20 @@ class Trainer:
             config.model.train()
             loss_avg = AverageMeter()
             for data in self.trainloader:
-                config.optimizer.zero_grad()
+                config.prune_optimizer.zero_grad()
                 inputs, labels = data
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 outputs = config.model(inputs)
                 loss = config.loss_fn(outputs, labels)
                 loss.backward()
-                config.optimizer.step()
+                config.prune_optimizer.step()
                 loss_avg.update(loss.item(), inputs.size(0))
             self.writer.add_scalar(
                 'Loss/train', loss_avg.avg, self.global_step)
             accuracy = self.eval_model()
             self.pbar.set_description(
-                f'Pre-Prune: Epoch {epoch+1}/{epoch_config.num_pre_prune_epochs}' + f'; Loss/Train: {loss_avg.avg:.4f}'
+                f'Pre-Prune: Epoch {epoch+1}/{epoch_config.num_pre_prune_epochs}' +
+                f'; Loss/Train: {loss_avg.avg:.4f}'
                 + f'; Accuracy/Test: {accuracy:.4f}')
 
     def _run_prune(self):
@@ -136,6 +139,8 @@ class Trainer:
         self.pruner.start_pruning()
         for iteration in range(epoch_config.num_prune_iterations):
             self._run_prune_iteration(iteration)
+        self._checkpoint_model('prune')
+        self.pruner.apply_masks()
 
     def _run_prune_iteration(self, iteration):
         config = self.config
@@ -147,7 +152,7 @@ class Trainer:
             config.model.train()
             loss_avg = AverageMeter()
             for data in self.trainloader:
-                config.optimizer.zero_grad()
+                config.prune_optimizer.zero_grad()
                 inputs, labels = data
                 inputs, labels = inputs.to(
                     self.device), labels.to(
@@ -156,7 +161,7 @@ class Trainer:
                 loss = config.loss_fn(outputs, labels)
                 self.pruner.provide_loss(loss)
                 loss.backward()
-                config.optimizer.step()
+                config.prune_optimizer.step()
                 loss_avg.update(loss.item(), inputs.size(0))
             self.writer.add_scalar(
                 'Loss/train', loss_avg.avg, self.global_step)
@@ -171,45 +176,58 @@ class Trainer:
         self.compute_prune_stats()
         self.pruner.reset_weights()
 
-    def _run_post_prune(self):
+    def _run_training(self):
         config = self.config
         epoch_config = self.epoch_config
-        for epoch in range(epoch_config.num_post_prune_epochs):
+        best_loss = np.inf
+        iter_no_change = 0
+        for epoch in range(epoch_config.num_train_epochs):
             self.global_step += 1
             self.pbar.update(1)
             config.model.train()
             loss_avg = AverageMeter()
             for data in self.trainloader:
-                config.post_prune_optimizer.zero_grad()
+                config.train_optimizer.zero_grad()
                 inputs, labels = data
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 outputs = config.model(inputs)
                 loss = config.loss_fn(outputs, labels)
                 loss.backward()
-                config.post_prune_optimizer.step()
+                config.train_optimizer.step()
                 loss_avg.update(loss.item(), inputs.size(0))
+            loss = loss_avg.avg
             self.writer.add_scalar(
-                'Loss/train', loss_avg.avg, self.global_step)
+                'Loss/train', loss, self.global_step)
             accuracy = self.eval_model()
             self.pbar.set_description(
-                f'Post-Prune: '
-                + f'Epoch {epoch+1}/{epoch_config.num_post_prune_epochs}' +
+                f'Training: '
+                + f'Epoch {epoch+1}/{epoch_config.num_train_epochs}' +
                 f'; Loss/Train: {loss_avg.avg:.4f}' +
                 f'; Accuracy/Test: {accuracy:.4f}')
+            if loss > (best_loss - config.train_convergence_loss_tolerance):
+                iter_no_change += 1
+            else:
+                iter_no_change = 0
+            if loss < best_loss:
+                best_loss = loss
+            if iter_no_change >= config.train_loss_num_epochs_no_change:
+                tqdm.write(f'Model converged in {epoch+1} epochs')
+                break
+        self._checkpoint_model('trained')
 
+    @torch.no_grad
     def eval_model(self) -> float:
         model = self.config.model
         model.eval()
         total = 0
         correct = 0
-        with torch.no_grad():
-            for data in self.testloader:
-                inputs, labels = data
-                inputs, labels = inputs.to(self.device), labels.to(self.device)
-                total += labels.size(0)
-                outputs = model(inputs)
-                _, predicted = torch.max(outputs.data, 1)
-                correct += (predicted == labels).sum().item()
+        for data in self.testloader:
+            inputs, labels = data
+            inputs, labels = inputs.to(self.device), labels.to(self.device)
+            outputs = model(inputs)
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
         accuracy = correct / total
         self.writer.add_scalar('Accuracy/Test', accuracy, self.global_step)
         return accuracy
@@ -236,7 +254,8 @@ class Trainer:
             self.writer.add_scalar(
                 f'{name}/pruned_percent', percent, self.global_step)
         all_params_non_zero = all_params_total - all_params_pruned
-        all_params_percent = 100 * all_params_pruned / (all_params_total + 1e-6)
+        all_params_percent = 100 * all_params_pruned / \
+            (all_params_total + 1e-6)
         tqdm.write(f'Name: All; Total: {all_params_total}; '
                    f'non-zero: {all_params_non_zero}; pruned: {all_params_pruned}; '
                    f'percent: {all_params_percent:.2f}%')

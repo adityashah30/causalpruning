@@ -10,32 +10,15 @@ class TransformedCIFAR10(datasets.CIFAR10):
 
     _TRAIN_FPATH = 'train.pth'
     _TEST_FPATH = 'test.pth'
-    _TRANSFORM_TRAIN = [v2.RandomHorizontalFlip(),
-                        v2.ToImage(),
-                        v2.ToDtype(torch.float32, scale=True),
-                        v2.Normalize(
-        mean=(0.4914, 0.4822, 0.4465),
-        std=(0.2023, 0.1994, 0.2010))]
-    _TRANSFORM_TEST = [v2.ToImage(),
-                       v2.ToDtype(torch.float32, scale=True),
-                       v2.Normalize(
-        mean=(0.4914, 0.4822, 0.4465),
-        std=(0.2023, 0.1994, 0.2010))]
 
     def __init__(
             self, root: str, size: int, train: bool = True,
-            recompute: bool = False):
-        transforms = self._TRANSFORM_TEST
-        if train:
-            transforms = self._TRANSFORM_TRAIN
-        if size != 32:
-            transforms = [v2.Resize(size)] + transforms
-        transforms = v2.Compose(transforms)
+            recompute: bool = False, transforms: list[v2.Transform] = []):
         cifar10_root = os.path.join(root, 'cifar10')
 
         super().__init__(
             cifar10_root, train, download=True,
-            transform=transforms)
+            transform=v2.Compose(transforms))
 
         size_dir = os.path.join(self.root, f'{size}x{size}')
         os.makedirs(size_dir, exist_ok=True)

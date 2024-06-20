@@ -24,11 +24,11 @@ from causalpruner import (
 from models import get_model
 from datasets import get_dataset
 from pruner.mag_pruner import (
-    MagPruner, 
+    MagPruner,
     MagPrunerConfig,
 )
 from trainer import (
-    DataConfig, 
+    DataConfig,
     EpochConfig,
     Pruner,
     Trainer,
@@ -36,7 +36,7 @@ from trainer import (
 )
 
 
-def get_optimizer(
+def get_prune_optimizer(
         name: str, model: nn.Module, lr: float, momentum: float) -> optim.Optimizer:
     name = name.lower()
     if name == 'sgd':
@@ -44,7 +44,7 @@ def get_optimizer(
     raise NotImplementedError(f'{name} is not a supported Optimizier')
 
 
-def get_post_prune_optimizer(
+def get_train_optimizer(
         name: str, model: nn.Module, lr: float) -> optim.Optimizer:
     name = name.lower()
     if name == 'adam':
@@ -76,52 +76,57 @@ def main(args):
     train_dataset, test_dataset = get_dataset(
         dataset_name, model_name, args.dataset_root_dir, args.recompute_dataset)
     model = get_model(model_name, dataset_name).to(best_device())
-    optimizer = get_optimizer(args.optimizer, model, args.lr, args.momentum)
-    post_prune_optimizer = get_post_prune_optimizer(args.post_prune_optimizer,
-                                                    model,
-                                                    args.post_prune_lr)
+    prune_optimizer = get_prune_optimizer(
+        args.optimizer, model, args.lr, args.momentum)
+    train_optimizer = get_train_optimizer(
+        args.train_optimizer, model, args.train_lr)
     data_config = DataConfig(
         train_dataset=train_dataset, test_dataset=test_dataset,
         batch_size=args.batch_size, num_workers=args.num_dataset_workers,
         shuffle=args.shuffle_dataset, pin_memory=args.pin_memory)
     epoch_config = EpochConfig(
-        num_pre_prune_epochs=args.num_pre_prune_epochs,
-        num_prune_iterations=args.num_prune_iterations,
-        num_prune_epochs=args.num_prune_epochs,
-        num_post_prune_epochs=args.num_post_prune_epochs)
+        num_pre_prune_epochs=args.num_pre_prune_epochs if args.prune else 0,
+        num_prune_iterations=args.num_prune_iterations if args.prune else 0,
+        num_prune_epochs=args.num_prune_epochs if args.prune else 0,
+        num_train_epochs=args.max_train_epochs)
     trainer_config = TrainerConfig(
-        model=model, optimizer=optimizer,
-        post_prune_optimizer=post_prune_optimizer, data_config=data_config,
-        epoch_config=epoch_config, tensorboard_dir=tensorboard_dir,
-        checkpoint_dir=checkpoint_dir, verbose=args.verbose)
-    if args.pruner == 'causalpruner':
-        causal_weights_trainer_config = CausalWeightsTrainerConfig(
-            init_lr=args.causal_pruner_init_lr, 
-            momentum=args.momentum > 0,
-            l1_regularization_coeff=args.causal_pruner_l1_regularization_coeff,
-            max_iter=args.causal_pruner_max_iter, 
-            loss_tol=args.causal_pruner_loss_tol, 
-            num_iter_no_change=args.causal_pruner_num_iter_no_change,
-            backend=args.causal_pruner_backend)
-        pruner_config = SGDPrunerConfig(
-            model=model, 
-            pruner='SGDPruner', 
-            checkpoint_dir=checkpoint_dir,
-            start_clean=args.start_clean, 
-            batch_size=args.causal_pruner_batch_size,
-            preload=args.causal_pruner_preload,
-            trainer_config=causal_weights_trainer_config, 
-            delete_checkpoint_dir_after_training=args.delete_checkpoint_dir_after_training,
-            device=best_device())
-    elif args.pruner == 'magpruner':
-        pruner_config = MagPrunerConfig(
-            model=model,
-            pruner='MagPruner', 
-            checkpoint_dir=checkpoint_dir,
-            start_clean=args.start_clean, 
-            prune_amount=args.mag_pruner_amount, 
-            device=best_device())
-    pruner = get_pruner(pruner_config)
+        model=model, prune_optimizer=prune_optimizer,
+        train_optimizer=train_optimizer,
+        train_convergence_loss_tolerance=args.train_convergence_loss_tolerance,
+        train_loss_num_epochs_no_change=args.train_loss_num_epochs_no_change,
+        data_config=data_config, epoch_config=epoch_config,
+        tensorboard_dir=tensorboard_dir,checkpoint_dir=checkpoint_dir,
+        verbose=args.verbose)
+    pruner = None
+    if args.prune:
+        if args.pruner == 'causalpruner':
+            causal_weights_trainer_config = CausalWeightsTrainerConfig(
+                init_lr=args.causal_pruner_init_lr,
+                momentum=args.momentum > 0,
+                l1_regularization_coeff=args.causal_pruner_l1_regularization_coeff,
+                max_iter=args.causal_pruner_max_iter,
+                loss_tol=args.causal_pruner_loss_tol,
+                num_iter_no_change=args.causal_pruner_num_iter_no_change,
+                backend=args.causal_pruner_backend)
+            pruner_config = SGDPrunerConfig(
+                model=model,
+                pruner='SGDPruner',
+                checkpoint_dir=checkpoint_dir,
+                start_clean=args.start_clean,
+                batch_size=args.causal_pruner_batch_size,
+                preload=args.causal_pruner_preload,
+                trainer_config=causal_weights_trainer_config,
+                delete_checkpoint_dir_after_training=args.delete_checkpoint_dir_after_training,
+                device=best_device())
+        elif args.pruner == 'magpruner':
+            pruner_config = MagPrunerConfig(
+                model=model,
+                pruner='MagPruner',
+                checkpoint_dir=checkpoint_dir,
+                start_clean=args.start_clean,
+                prune_amount=args.mag_pruner_amount,
+                device=best_device())
+        pruner = get_pruner(pruner_config)
     trainer = Trainer(trainer_config, pruner)
     trainer.run()
 
@@ -132,11 +137,20 @@ def parse_args() -> argparse.Namespace:
     # Model args
     parser.add_argument('--model', type=str, choices=['alexnet', 'lenet'],
                         default='lenet', help='Model name')
-    parser.add_argument('--convergence_train_loss', type=float, default=5e-3, 
-                        help='Considers the model converged when train loss reaches this value.')
+    parser.add_argument('--train_convergence_loss_tolerance', type=float,
+                        default=1e-3,
+                        help='Considers the model converged when train loss does not change by more than this value for train_loss_num_epochs_no_change')
+    parser.add_argument('--train_loss_num_epochs_no_change', type=int,
+                        default=3,
+                        help='Considers the model converged when train loss does not change by more than train_convergence_loss_tolerance for these many epochs')
     parser.add_argument('--max_train_epochs', type=int, default=100,
                         help='Maximum number of epochs for train the model')
-    
+    parser.add_argument(
+        '--train_optimizer', type=str, default='adam',
+        help='Training Optimizer', choices=['adam', 'sgd'])
+    parser.add_argument(
+        '--train_lr', type=float, default=3e-4,
+        help='Learning rate for the train optimizer')
     # Dataset args
     parser.add_argument('--dataset', type=str,
                         default='cifar10', help='Dataset name')
@@ -158,39 +172,35 @@ def parse_args() -> argparse.Namespace:
         '--pin_memory', action=argparse.BooleanOptionalAction,
         default=True,
         help='Whether to pin the Dataloader memory for train and test datasets')
+    parser.add_argument('--batch_size', type=int,
+                        default=512, help='Batch size')
+    # Dirs
+    parser.add_argument(
+        '--checkpoint_dir', type=str, default='../checkpoints',
+        help='Checkpoint dir to write model weights and losses')
     parser.add_argument(
         '--tensorboard_dir', type=str, default='../tensorboard',
         help='Directory to write tensorboard data')
-    parser.add_argument('--batch_size', type=int,
-                        default=512, help='Batch size')
+    # Pruner args
+    parser.add_argument(
+        '--prune', action=argparse.BooleanOptionalAction,
+        default=True,
+        help='Prunes the model and then trains it if set to true -- else just trains it until convergence')
     parser.add_argument('--num_pre_prune_epochs', type=int, default=10,
                         help='Number of epochs for pretraining')
     parser.add_argument('--num_prune_iterations', type=int, default=10,
                         help='Number of iterations to prune')
     parser.add_argument('--num_prune_epochs', type=int, default=10,
                         help='Number of epochs for pruning')
-    parser.add_argument('--num_post_prune_epochs', type=int, default=100,
-                        help='Number of epochs to run post training')
     parser.add_argument('--optimizer', type=str,
                         default='sgd', help='Optimizer', choices=['sgd'])
     parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate')
     parser.add_argument('--momentum', type=float, default=0.0, help='Momentum')
-    parser.add_argument(
-        '--post_prune_optimizer', type=str, default='adam',
-        help='Post Prune Optimizer', choices=['adam', 'sgd'])
-    parser.add_argument(
-        '--post_prune_lr', type=float, default=3e-4,
-        help='Learning rate for the post prune optimizer')
-    parser.add_argument(
-        '--prune', action=argparse.BooleanOptionalAction, 
-        default=True, 
-        help='Prunes the model and then trains it if set to true -- else just trains it until convergence')
+
     parser.add_argument(
         '--pruner', type=str, default='causalpruner',
         help='Method for pruning', choices=['causalpruner', 'magpruner'])
-    parser.add_argument(
-        '--checkpoint_dir', type=str, default='../checkpoints',
-        help='Checkpoint dir to write model weights and losses')
+
     parser.add_argument(
         '--start_clean', action=argparse.BooleanOptionalAction,
         default=True,
@@ -218,18 +228,18 @@ def parse_args() -> argparse.Namespace:
         default=True,
         help='Controls whether to preload the params and losses dataset. Turn off for very large models')
     parser.add_argument(
-        '--delete_checkpoint_dir_after_training', 
-        action=argparse.BooleanOptionalAction, 
-        default=True, 
+        '--delete_checkpoint_dir_after_training',
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help='Deletes the checkpoint directory once params are trained. Used to save space.')
     parser.add_argument(
-        '--causal_pruner_backend', type=str, default='sklearn', 
+        '--causal_pruner_backend', type=str, default='torch',
         choices=['sklearn', 'torch'],
         help='Causal weights trainer backend')
     parser.add_argument('--mag_pruner_amount', type=float,
                         default=0.4, help='Magnitude pruning fraction')
     parser.add_argument(
-        '--verbose', action=argparse.BooleanOptionalAction, 
+        '--verbose', action=argparse.BooleanOptionalAction,
         default=True, help='Output verbosity')
 
     return parser.parse_args()
