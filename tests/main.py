@@ -83,7 +83,7 @@ def main(args):
     data_config = DataConfig(
         train_dataset=train_dataset, test_dataset=test_dataset,
         batch_size=args.batch_size, num_workers=args.num_dataset_workers,
-        shuffle=args.shuffle_dataset, pin_memory=args.pin_memory)
+        shuffle=args.shuffle_dataset)
     epoch_config = EpochConfig(
         num_pre_prune_epochs=args.num_pre_prune_epochs if args.prune else 0,
         num_prune_iterations=args.num_prune_iterations if args.prune else 0,
@@ -168,10 +168,6 @@ def parse_args() -> argparse.Namespace:
         '--shuffle_dataset', action=argparse.BooleanOptionalAction,
         default=True,
         help='Whether to shuffle the train and test datasets')
-    parser.add_argument(
-        '--pin_memory', action=argparse.BooleanOptionalAction,
-        default=True,
-        help='Whether to pin the Dataloader memory for train and test datasets')
     parser.add_argument('--batch_size', type=int,
                         default=512, help='Batch size')
     # Dirs
@@ -209,7 +205,7 @@ def parse_args() -> argparse.Namespace:
         '--causal_pruner_init_lr', type=float, default=1e-2,
         help='Learning rate for causal pruner')
     parser.add_argument(
-        '--causal_pruner_l1_regularization_coeff', type=float, default=1e-7,
+        '--causal_pruner_l1_regularization_coeff', type=float, default=1e-14,
         help='Causal Pruner L1 regularization coefficient')
     parser.add_argument(
         '--causal_pruner_max_iter', type=int, default=1000,
@@ -225,7 +221,7 @@ def parse_args() -> argparse.Namespace:
         help='Batch size for causal pruner training. Use -1 to use the entire dataset')
     parser.add_argument(
         '--causal_pruner_preload', action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
         help='Controls whether to preload the params and losses dataset. Turn off for very large models')
     parser.add_argument(
         '--delete_checkpoint_dir_after_training',

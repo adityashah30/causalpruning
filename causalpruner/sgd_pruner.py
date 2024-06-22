@@ -4,7 +4,9 @@ import copy
 from dataclasses import dataclass
 import os
 import shutil
+import time
 
+import psutil
 import torch
 import torch.nn as nn
 import torch.nn.utils.prune as prune
@@ -34,7 +36,6 @@ class ParamDataset(Dataset):
         self.preload = preload
         if preload:
             self.preload_data()
-        self._compute_mean_and_std()
 
     @torch.no_grad
     def preload_data(self):
@@ -47,34 +48,6 @@ class ParamDataset(Dataset):
         self.preloaded_losses = torch.stack(loss_list)
 
     @torch.no_grad
-    def _compute_mean_and_std(self):
-        if self.preload:
-            self.param_mean = torch.mean(self.preloaded_params, dim=0)
-            self.param_std = torch.std(self.preloaded_params, dim=0)
-            self.loss_mean = torch.mean(self.preloaded_losses, dim=0)
-            self.loss_std = torch.std(self.preloaded_losses, dim=0)
-            return
-        param, loss = self.get_item(0)
-        param_total = param
-        loss_total = loss
-        param_sq_total = torch.square(param)
-        loss_sq_total = torch.square(loss)
-        num_items = len(self)
-        for idx in range(1, num_items):
-            param, loss = self.get_item(idx)
-            param_sq, loss_sq = torch.square(param), torch.square(loss)
-            param_total += param
-            loss_total += loss
-            param_sq_total += param_sq
-            loss_sq_total += loss_sq
-        self.param_mean = (param_total / num_items)
-        self.loss_mean = (loss_total / num_items)
-        self.param_std = torch.sqrt(
-            param_sq_total / num_items - torch.square(self.param_mean))
-        self.loss_std = torch.sqrt(
-            loss_sq_total / num_items - torch.square(self.loss_mean))
-
-    @torch.no_grad
     def __len__(self) -> int:
         return self.num_items - 2 if self.momentum else self.num_items - 1
 
@@ -85,10 +58,6 @@ class ParamDataset(Dataset):
             loss = self.preloaded_losses[idx]
         else:
             param, loss = self.get_item(idx)
-        param = ((param - self.param_mean) /
-                 (self.param_std))
-        loss = ((loss - self.loss_mean) /
-                (self.loss_std))
         return (param, loss)
 
     @torch.no_grad
@@ -166,7 +135,8 @@ class SGDPruner(Pruner):
         self.counter = 0
         self.trainer_config = config.trainer_config
         self.causal_weights_trainers = dict()
-        self.checkpointer = ProcessPoolExecutor()
+        self.checkpointer = ProcessPoolExecutor(
+            max_workers=min(psutil.cpu_count() - 2, 6))
         self.checkpoint_futures = []
         for param_name in self.params:
             trainer_config_copy = copy.deepcopy(self.trainer_config)
@@ -184,28 +154,31 @@ class SGDPruner(Pruner):
     @torch.no_grad
     def provide_loss(self, loss: torch.Tensor) -> None:
         loss = loss.detach().cpu()
-        future = self.checkpointer.submit(
-            torch.save, loss, self._get_checkpoint_path('loss'))
-        self.checkpoint_futures.append(future)
+        self.write_tensor(loss, self._get_checkpoint_path('loss'))
         for param in self.params:
             module = self.modules_dict[param]
             weight = module.weight.detach().cpu()
             weight = torch.flatten(weight)
-            future = self.checkpointer.submit(
-                torch.save, weight, self._get_checkpoint_path(param))
-            self.checkpoint_futures.append(future)
+            self.write_tensor(weight, self._get_checkpoint_path(param))
         self.counter += 1
+
+    @torch.no_grad
+    def write_tensor(self, tensor: torch.Tensor, path: str):
+        while psutil.virtual_memory().percent >= 95:
+            time.sleep(0.1)  # 100ms
+        future = self.checkpointer.submit(torch.save, tensor, path)
+        self.checkpoint_futures.append(future)
 
     def compute_masks(self):
         self.train_pruning_weights()
         for module_name, module in self.modules_dict.items():
-            mask = self._get_mask(module_name)
+            mask = self.get_mask(module_name)
             prune.custom_from_mask(module, 'weight', mask)
 
     def train_pruning_weights(self) -> None:
         params = self.param_checkpoint_dirs.items()
-        pbar_pruning = tqdm(total=len(params), leave=False)
         concurrent.futures.wait(self.checkpoint_futures)
+        pbar_pruning = tqdm(total=len(params), leave=False)
         for param, param_dir in params:
             pbar_pruning.set_description(param)
             pbar_pruning.update(1)
@@ -213,15 +186,17 @@ class SGDPruner(Pruner):
         self._delete_checkpoint_dirs()
 
     def _delete_checkpoint_dirs(self):
-        if self.config.delete_checkpoint_dir_after_training:
-            loss_dir = os.path.join(
-                self.loss_checkpoint_dir, f'{self.iteration}')
-            shutil.rmtree(loss_dir)
-            for param_dir in self.param_checkpoint_dirs.values():
-                param_dir = os.path.join(param_dir, f'{self.iteration}')
-                shutil.rmtree(param_dir)
+        if not self.config.delete_checkpoint_dir_after_training:
+            return
+        loss_dir = os.path.join(
+            self.loss_checkpoint_dir, f'{self.iteration}')
+        shutil.rmtree(loss_dir)
+        for param_dir in self.param_checkpoint_dirs.values():
+            param_dir = os.path.join(param_dir, f'{self.iteration}')
+            shutil.rmtree(param_dir)
 
-    def _get_mask(self, name: str) -> torch.Tensor:
+    @torch.no_grad
+    def get_mask(self, name: str) -> torch.Tensor:
         trainer = self.causal_weights_trainers[name]
         mask = trainer.get_non_zero_weights()
         mask = mask.reshape_as(self.modules_dict[name].weight)
@@ -242,18 +217,17 @@ class SGDPruner(Pruner):
         dataset = ParamDataset(param_dir, loss_dir,
                                self.trainer_config.momentum,
                                preload=self.config.preload)
+        trainer = self.causal_weights_trainers[param]
+        trainer.reset()
         batch_size = self.config.batch_size
-        if batch_size < 0:
+        if batch_size < 0 or not trainer.supports_batch_training():
             batch_size = len(dataset)
         dataloader = DataLoader(
             dataset, batch_size=batch_size, pin_memory=True)
-        trainer = self.causal_weights_trainers[param]
-        trainer.reset()
         pbar_prune = tqdm(dataloader, leave=False)
         for idx, (delta_params, delta_losses) in enumerate(pbar_prune):
             pbar_prune.set_description(f'Pruning {param}/{idx}')
             num_iters = trainer.fit(delta_params, delta_losses)
-            torch.cuda.empty_cache()
         if num_iters == self.trainer_config.max_iter:
             tqdm.write(f'{param} pruning failed to converge in ' +
                        f'{num_iters} steps. Consider increasing ' +

@@ -41,6 +41,9 @@ class CausalWeightsTrainer(ABC):
         if self.momentum:
             self.weights_dim_multiplier = 3
 
+    def supports_batch_training(self) -> bool:
+        return True
+
     @abstractmethod
     def reset(self):
         raise NotImplementedError('Use the sklearn or pytorch version')
@@ -72,10 +75,13 @@ class CausalWeightsTrainerSklearn(CausalWeightsTrainer):
             n_iter_no_change=self.num_iter_no_change,
             shuffle=True)
 
+    def supports_batch_training(self) -> bool:
+        return False
+
     def fit(self, X: torch.Tensor, Y: torch.Tensor) -> int:
         X = X.detach().cpu().numpy()
         Y = Y.detach().cpu().numpy()
-        self.trainer.partial_fit(X, Y)
+        self.trainer.fit(X, Y)
         return self.trainer.n_iter_
 
     def get_non_zero_weights(self) -> torch.Tensor:
@@ -83,7 +89,7 @@ class CausalWeightsTrainerSklearn(CausalWeightsTrainer):
         if self.momentum:
             mask = mask.reshape((self.weights_dim_multiplier, -1))
         mask = np.atleast_2d(mask)
-        mask = np.all(np.abs(mask) <= self.l1_regularization_coeff, axis=0)
+        mask = np.all(mask == 0, axis=0)
         mask = np.where(mask, 0, 1)
         return torch.tensor(mask, device=self.device)
 
@@ -97,20 +103,21 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
         super().__init__(config, device)
         self.flattened_dims = np.prod(model_weights.size(), dtype=int)
         self.flattened_dims *= self.weights_dim_multiplier
-    
-    @torch.no_grad
-    def reset(self):
         self.layer = nn.Linear(
             self.flattened_dims, 1, bias=False, device=self.device)
-        nn.init.zeros_(self.layer.weight)
         self.optimizer = LassoSGD(
             self.layer.parameters(),
             init_lr=self.init_lr, alpha=self.l1_regularization_coeff)
 
+    @torch.no_grad
+    def reset(self):
+        nn.init.zeros_(self.layer.weight)
+        self.optimizer.reset()
+
     def fit(self, X: torch.Tensor, Y: torch.Tensor) -> int:
         self.layer.train()
-        X = X.to(device=self.device)
-        Y = Y.to(device=self.device)
+        X = X.to(device=self.device, non_blocking=True)
+        Y = Y.to(device=self.device, non_blocking=True)
         num_items = X.shape[0]
         best_loss = np.inf
         iter_no_change = 0
@@ -118,18 +125,18 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
             sumloss = 0.0
             indices = torch.randperm(num_items)
             for idx in indices:
-                self.optimizer.zero_grad()
                 output = self.layer(X[idx])
                 label = Y[idx].view(-1)
                 loss = 0.5 * F.mse_loss(output, label, reduction='sum')
                 loss.backward()
                 self.optimizer.step()
+                self.optimizer.zero_grad()
                 sumloss += loss.item()
-            if loss > (best_loss - self.loss_tol):
+            if sumloss > (best_loss - self.loss_tol):
                 iter_no_change += 1
             else:
                 iter_no_change = 0
-            if loss < best_loss:
+            if sumloss < best_loss:
                 best_loss = loss
             if iter_no_change >= self.num_iter_no_change:
                 return iter + 1
@@ -140,14 +147,13 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
         mask = self.layer.weight
         if self.momentum:
             mask = mask.view(self.weights_dim_multiplier, -1)
-        mask = torch.all(torch.abs(mask) <=
-                         self.l1_regularization_coeff, dim=0)
+        mask = torch.all(mask == 0, dim=0)
         return torch.where(mask, 0, 1)
 
 
 def get_causal_weights_trainer(
-        config: CausalWeightsTrainerConfig, 
-        device: Union[str, torch.device],*args) -> CausalWeightsTrainer:
+        config: CausalWeightsTrainerConfig,
+        device: Union[str, torch.device], *args) -> CausalWeightsTrainer:
     if config.backend == 'sklearn':
         return CausalWeightsTrainerSklearn(config, device)
     elif config.backend == 'torch':

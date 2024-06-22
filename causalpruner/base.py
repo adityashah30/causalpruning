@@ -64,6 +64,7 @@ class Pruner(ABC):
             shutil.rmtree(self.checkpoint_dir)
         os.makedirs(self.checkpoint_dir, exist_ok=True)
 
+        self.init_model_path = os.path.join(self.checkpoint_dir, 'init.ckpt')
         self.loss_checkpoint_dir = os.path.join(
             self.checkpoint_dir, 'loss')
         os.makedirs(self.loss_checkpoint_dir, exist_ok=True)
@@ -106,13 +107,7 @@ class Pruner(ABC):
 
     @torch.no_grad
     def start_pruning(self) -> None:
-        for param in self.params:
-            param_dir = os.path.join(
-                self.param_checkpoint_dirs[param], 'initial')
-            os.makedirs(param_dir, exist_ok=True)
-            module = self.modules_dict[param]
-            torch.save(torch.flatten(module.weight.detach().clone()),
-                       os.path.join(param_dir, 'ckpt.initial'))
+        torch.save(self.config.model.state_dict(), self.init_model_path)
 
     @torch.no_grad
     def start_iteration(self) -> None:
@@ -128,11 +123,13 @@ class Pruner(ABC):
 
     @torch.no_grad
     def reset_weights(self) -> None:
-        for param in self.params:
-            initial_param_path = os.path.join(
-                self.param_checkpoint_dirs[param],
-                'initial/ckpt.initial')
-            initial_param = torch.load(initial_param_path)
-            weight = self.modules_dict[param].weight
-            initial_param = initial_param.reshape_as(weight)
-            weight.data = initial_param
+        self.config.model.zero_grad()
+        masks = dict()
+        for name, module in self.modules_dict.items():
+            if hasattr(module, 'weight_mask'):
+                masks[name] = getattr(module, 'weight_mask')
+        self.remove_masks()
+        self.config.model.load_state_dict(torch.load(self.init_model_path))
+        for name, module in self.modules_dict.items():
+            if name in masks:
+                prune.custom_from_mask(module, 'weight', masks[name])

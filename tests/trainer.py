@@ -21,7 +21,6 @@ class DataConfig:
     batch_size: int
     num_workers: int
     shuffle: bool
-    pin_memory: bool
 
 
 @dataclass
@@ -93,12 +92,12 @@ class Trainer:
         data_config = self.data_config
         self.trainloader = DataLoader(
             data_config.train_dataset, batch_size=data_config.batch_size,
-            shuffle=data_config.shuffle, pin_memory=data_config.pin_memory,
+            shuffle=data_config.shuffle, pin_memory=True,
             num_workers=data_config.num_workers,
             persistent_workers=data_config.num_workers > 0)
         self.testloader = DataLoader(
             data_config.test_dataset, batch_size=data_config.batch_size,
-            shuffle=data_config.shuffle, pin_memory=data_config.pin_memory,
+            shuffle=data_config.shuffle, pin_memory=True,
             num_workers=data_config.num_workers,
             persistent_workers=data_config.num_workers > 0)
 
@@ -118,13 +117,14 @@ class Trainer:
             config.model.train()
             loss_avg = AverageMeter()
             for data in self.trainloader:
-                config.prune_optimizer.zero_grad()
                 inputs, labels = data
-                inputs, labels = inputs.to(self.device), labels.to(self.device)
+                inputs = inputs.to(self.device, non_blocking=True)
+                labels = labels.to(self.device, non_blocking=True)
                 outputs = config.model(inputs)
                 loss = config.loss_fn(outputs, labels)
                 loss.backward()
                 config.prune_optimizer.step()
+                config.prune_optimizer.zero_grad()
                 loss_avg.update(loss.item(), inputs.size(0))
             self.writer.add_scalar(
                 'Loss/train', loss_avg.avg, self.global_step)
@@ -152,16 +152,15 @@ class Trainer:
             config.model.train()
             loss_avg = AverageMeter()
             for data in self.trainloader:
-                config.prune_optimizer.zero_grad()
                 inputs, labels = data
-                inputs, labels = inputs.to(
-                    self.device), labels.to(
-                    self.device)
+                inputs = inputs.to(self.device, non_blocking=True)
+                labels = labels.to(self.device, non_blocking=True)
                 outputs = config.model(inputs)
                 loss = config.loss_fn(outputs, labels)
                 self.pruner.provide_loss(loss)
                 loss.backward()
                 config.prune_optimizer.step()
+                config.prune_optimizer.zero_grad()
                 loss_avg.update(loss.item(), inputs.size(0))
             self.writer.add_scalar(
                 'Loss/train', loss_avg.avg, self.global_step)
@@ -187,13 +186,14 @@ class Trainer:
             config.model.train()
             loss_avg = AverageMeter()
             for data in self.trainloader:
-                config.train_optimizer.zero_grad()
                 inputs, labels = data
-                inputs, labels = inputs.to(self.device), labels.to(self.device)
+                inputs = inputs.to(self.device, non_blocking=True)
+                labels = labels.to(self.device, non_blocking=True)
                 outputs = config.model(inputs)
                 loss = config.loss_fn(outputs, labels)
                 loss.backward()
                 config.train_optimizer.step()
+                config.train_optimizer.zero_grad()
                 loss_avg.update(loss.item(), inputs.size(0))
             loss = loss_avg.avg
             self.writer.add_scalar(
@@ -223,7 +223,8 @@ class Trainer:
         correct = 0
         for data in self.testloader:
             inputs, labels = data
-            inputs, labels = inputs.to(self.device), labels.to(self.device)
+            inputs = inputs.to(self.device, non_blocking=True)
+            labels = labels.to(self.device, non_blocking=True)
             outputs = model(inputs)
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
@@ -232,6 +233,7 @@ class Trainer:
         self.writer.add_scalar('Accuracy/Test', accuracy, self.global_step)
         return accuracy
 
+    @torch.no_grad
     def compute_prune_stats(self):
         if not self.config.verbose:
             return
