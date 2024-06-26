@@ -202,7 +202,7 @@ class Trainer:
             self.pbar.set_description(
                 f'Training: '
                 + f'Epoch {epoch+1}/{epoch_config.num_train_epochs}' +
-                f'; Loss/Train: {loss_avg.avg:.4f}' +
+                f'; Loss/Train: {loss:.4f}' +
                 f'; Accuracy/Test: {accuracy:.4f}')
             if loss > (best_loss - config.train_convergence_loss_tolerance):
                 iter_no_change += 1
