@@ -56,31 +56,36 @@ class TransformedCIFAR10(datasets.CIFAR10):
         return len(self.data)
 
 
+_DEFAULT_TRAIN_TRANSFORMS = [
+    v2.RandomHorizontalFlip(),
+    v2.ToImage(),
+    v2.ToDtype(torch.float32, scale=True),
+    v2.Normalize(
+        mean=(0.4914, 0.4822, 0.4465),
+        std=(0.2023, 0.1994, 0.2010))
+]
+_DEFAULT_TEST_TRANSFORMS = [
+    v2.ToImage(),
+    v2.ToDtype(torch.float32, scale=True),
+    v2.Normalize(
+        mean=(0.4914, 0.4822, 0.4465),
+        std=(0.2023, 0.1994, 0.2010))
+]
+
+
 def get_cifar_10(
-        model_name: str, 
-        root_dir: str, 
+        model_name: str,
+        root_dir: str,
         recompute: bool = False) -> tuple[data.Dataset, data.Dataset]:
+
     model_name = model_name.lower()
-    if model_name == 'lenet':
+    if model_name in ['lenet', 'fullyconnected']:
         train = TransformedCIFAR10(
             root_dir, size=32, train=True, recompute=recompute,
-            transforms=[
-                v2.RandomHorizontalFlip(),
-                v2.ToImage(),
-                v2.ToDtype(torch.float32, scale=True),
-                v2.Normalize(
-                    mean=(0.4914, 0.4822, 0.4465),
-                    std=(0.2023, 0.1994, 0.2010))
-            ])
+            transforms=_DEFAULT_TRAIN_TRANSFORMS)
         test = TransformedCIFAR10(
             root_dir, size=32, train=False, recompute=recompute,
-            transforms=[
-                v2.ToImage(),
-                v2.ToDtype(torch.float32, scale=True),
-                v2.Normalize(
-                    mean=(0.4914, 0.4822, 0.4465),
-                    std=(0.2023, 0.1994, 0.2010))
-            ])
+            transforms=_DEFAULT_TEST_TRANSFORMS)
         return (train, test)
     elif model_name == 'alexnet':
         train = TransformedCIFAR10(

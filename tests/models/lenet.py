@@ -7,7 +7,7 @@ class LeNet(nn.Module):
 
     def __init__(self, num_classes: int,
                  size_input: tuple[int, int, int]):
-        super(LeNet, self).__init__()
+        super().__init__()
         num_features, H, W = size_input
         self.conv1 = nn.Conv2d(num_features, 20, 5, 1)
         self.maxpool1 = nn.MaxPool2d(2, 2)
@@ -41,3 +41,10 @@ class LeNet(nn.Module):
         x = F.relu(self.fc1(x))
         x = self.fc2(x)
         return x
+
+
+def get_lenet(dataset: str) -> nn.Module:
+    dataset = dataset.lower()
+    if dataset == 'cifar10':
+        return LeNet(num_classes=10, size_input=(3, 32, 32))
+    raise NotImplementedError(f'Lenet is not available for {dataset}')

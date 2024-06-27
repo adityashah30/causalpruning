@@ -203,6 +203,7 @@ class Trainer:
                 f'Training: '
                 + f'Epoch {epoch+1}/{epoch_config.num_train_epochs}' +
                 f'; Loss/Train: {loss:.4f}' +
+                f'; Best Loss/Train: {best_loss:.4f}' +
                 f'; Accuracy/Test: {accuracy:.4f}')
             if loss > (best_loss - config.train_convergence_loss_tolerance):
                 iter_no_change += 1

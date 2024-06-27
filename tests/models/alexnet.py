@@ -4,10 +4,11 @@ import torch.nn.functional as F
 
 class AlexNet(nn.Module):
 
-    def __init__(self, num_classes):
-        super(AlexNet, self).__init__()
+    def __init__(self, num_classes: int, size_input: tuple[int, int, int]):
+        super().__init__()
+        num_features, H, W = size_input
         self.features = nn.Sequential(
-            nn.Conv2d(3, 64, kernel_size=11, stride=4, padding=2),
+            nn.Conv2d(num_features, H, kernel_size=11, stride=4, padding=2),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=3, stride=2),
 
@@ -41,3 +42,10 @@ class AlexNet(nn.Module):
         x = self.avgpool(x)
         x = x.view(x.size(0), 256*6*6)
         return self.classifier(x)
+
+
+def get_alexnet(dataset: str) -> nn.Module:
+    dataset = dataset.lower()
+    if dataset == 'cifar10':
+        return AlexNet(num_classes=10, size_input=(3, 64, 64))
+    raise NotImplementedError(f'AlexNet is not available for {dataset}')

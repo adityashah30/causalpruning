@@ -135,13 +135,14 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Causal Pruning')
 
     # Model args
-    parser.add_argument('--model', type=str, choices=['alexnet', 'lenet'],
+    parser.add_argument('--model', type=str, 
+                        choices=['alexnet', 'lenet', 'fullyconnected'],
                         default='lenet', help='Model name')
     parser.add_argument('--train_convergence_loss_tolerance', type=float,
-                        default=1e-3,
+                        default=1e-4,
                         help='Considers the model converged when train loss does not change by more than this value for train_loss_num_epochs_no_change')
     parser.add_argument('--train_loss_num_epochs_no_change', type=int,
-                        default=3,
+                        default=5,
                         help='Considers the model converged when train loss does not change by more than train_convergence_loss_tolerance for these many epochs')
     parser.add_argument('--max_train_epochs', type=int, default=100,
                         help='Maximum number of epochs for train the model')
