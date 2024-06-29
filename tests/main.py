@@ -135,7 +135,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Causal Pruning')
 
     # Model args
-    parser.add_argument('--model', type=str, 
+    parser.add_argument('--model', type=str,
                         choices=['alexnet', 'lenet', 'fullyconnected'],
                         default='lenet', help='Model name')
     parser.add_argument('--train_convergence_loss_tolerance', type=float,
@@ -154,6 +154,7 @@ def parse_args() -> argparse.Namespace:
         help='Learning rate for the train optimizer')
     # Dataset args
     parser.add_argument('--dataset', type=str,
+                        choices=['cifar10', 'mnist'],
                         default='cifar10', help='Dataset name')
     parser.add_argument(
         '--dataset_root_dir', type=str, default='../data',

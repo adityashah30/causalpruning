@@ -107,6 +107,9 @@ class Trainer:
             self._run_pre_prune()
             self._run_prune()
         self._run_training()
+        if self.pruner is not None:
+            self.pruner.apply_masks()
+        self._checkpoint_model('trained')
 
     def _run_pre_prune(self):
         config = self.config
@@ -140,7 +143,6 @@ class Trainer:
         for iteration in range(epoch_config.num_prune_iterations):
             self._run_prune_iteration(iteration)
         self._checkpoint_model('prune')
-        self.pruner.apply_masks()
 
     def _run_prune_iteration(self, iteration):
         config = self.config
