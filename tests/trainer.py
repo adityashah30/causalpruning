@@ -80,6 +80,13 @@ class EvalMetrics:
     f1_score: torch.Tensor
 
 
+def get_scalar_dict(t: torch.Tensor) -> dict[str, float]:
+    scalars = dict()
+    for idx, value in enumerate(t):
+        scalars[f'class_{idx}'] = value
+    return scalars
+
+
 class Trainer:
 
     def __init__(self, config: TrainerConfig, pruner: Optional[Pruner] = None):
@@ -125,14 +132,7 @@ class Trainer:
         if self.pruner is not None:
             self.pruner.apply_masks()
         self._checkpoint_model('trained')
-        eval_metrics = self.get_all_eval_metrics()
-        tqdm.write('\n======================================================\n')
-        tqdm.write('Final eval metrics:')
-        tqdm.write(f'Accuracy: {eval_metrics.accuracy}')
-        tqdm.write(f'Precision: {eval_metrics.precision}')
-        tqdm.write(f'Recall: {eval_metrics.recall}')
-        tqdm.write(f'F1 Score: {eval_metrics.f1_score}')
-        tqdm.write('\n======================================================\n')
+        self.get_all_eval_metrics()
 
     def _run_pre_prune(self):
         config = self.config
@@ -257,7 +257,7 @@ class Trainer:
         return accuracy
 
     @torch.no_grad
-    def get_all_eval_metrics(self) -> EvalMetrics:
+    def get_all_eval_metrics(self):
         model = self.config.model
         model.eval()
         accuracy = MulticlassAccuracy(
@@ -286,7 +286,24 @@ class Trainer:
             precision=precision.compute(),
             recall=recall.compute(),
             f1_score=f1_score.compute())
-        return eval_metrics
+        self._print_eval_metrics(eval_metrics)
+
+    def _print_eval_metrics(self, eval_metrics: EvalMetrics):
+        tqdm.write('\n======================================================\n')
+        tqdm.write('Final eval metrics:')
+        tqdm.write(f'Accuracy: {eval_metrics.accuracy}')
+        tqdm.write(f'Precision: {eval_metrics.precision}')
+        tqdm.write(f'Recall: {eval_metrics.recall}')
+        tqdm.write(f'F1 Score: {eval_metrics.f1_score}')
+        tqdm.write('\n======================================================\n')
+        self.writer.add_scalars(
+            'Final/Accuracy', get_scalar_dict(eval_metrics.accuracy), self.global_step)
+        self.writer.add_scalars(
+            'Final/Precision', get_scalar_dict(eval_metrics.precision), self.global_step)
+        self.writer.add_scalars(
+            'Final/Recall', get_scalar_dict(eval_metrics.recall), self.global_step)
+        self.writer.add_scalars(
+            'Final/F1Score', get_scalar_dict(eval_metrics.f1_score), self.global_step)
 
     @torch.no_grad
     def compute_prune_stats(self):

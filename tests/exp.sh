@@ -27,7 +27,7 @@ python main.py --model=lenet --dataset=cifar10 --prune --pruner=magpruner
 
 # Fully Connected
 python main.py --model=fullyconnected --dataset=cifar10 --no-prune
-python main.py --model=fullyconnected --dataset=cifar10--pruner=causalpruner
+python main.py --model=fullyconnected --dataset=cifar10 --pruner=causalpruner
 python main.py --model=fullyconnected --dataset=cifar10 --prune \
     --pruner=magpruner
 

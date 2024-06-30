@@ -8,7 +8,6 @@ sys.path.insert(
 # autopep: on
 
 import argparse
-from datetime import datetime
 
 import torch.nn as nn
 import torch.optim as optim
@@ -66,13 +65,12 @@ def get_pruner(pruner_config: PrunerConfig) -> Pruner:
 def main(args):
     if args.verbose:
         print(args)
-    timestamp = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
     prune=args.prune
     pruner = args.pruner
     model_name = args.model
     dataset_name = args.dataset
     prune_identifier = pruner if prune else 'noprune'
-    identifier = f'{prune_identifier}_{model_name}_{dataset_name}_{timestamp}'
+    identifier = f'{prune_identifier}_{model_name}_{dataset_name}'
     checkpoint_dir = os.path.join(args.checkpoint_dir, identifier)
     tensorboard_dir = os.path.join(args.tensorboard_dir, identifier)
     train_dataset, test_dataset, num_classes = get_dataset(
