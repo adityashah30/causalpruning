@@ -67,13 +67,15 @@ def main(args):
     if args.verbose:
         print(args)
     timestamp = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+    prune=args.prune
     pruner = args.pruner
     model_name = args.model
     dataset_name = args.dataset
-    identifier = f'{pruner}_{model_name}_{dataset_name}_{timestamp}'
+    prune_identifier = pruner if prune else 'noprune'
+    identifier = f'{prune_identifier}_{model_name}_{dataset_name}_{timestamp}'
     checkpoint_dir = os.path.join(args.checkpoint_dir, identifier)
     tensorboard_dir = os.path.join(args.tensorboard_dir, identifier)
-    train_dataset, test_dataset = get_dataset(
+    train_dataset, test_dataset, num_classes = get_dataset(
         dataset_name, model_name, args.dataset_root_dir, args.recompute_dataset)
     model = get_model(model_name, dataset_name).to(best_device())
     prune_optimizer = get_prune_optimizer(
@@ -83,7 +85,7 @@ def main(args):
     data_config = DataConfig(
         train_dataset=train_dataset, test_dataset=test_dataset,
         batch_size=args.batch_size, num_workers=args.num_dataset_workers,
-        shuffle=args.shuffle_dataset)
+        shuffle=args.shuffle_dataset, num_classes=num_classes)
     epoch_config = EpochConfig(
         num_pre_prune_epochs=args.num_pre_prune_epochs if args.prune else 0,
         num_prune_iterations=args.num_prune_iterations if args.prune else 0,
@@ -235,7 +237,7 @@ def parse_args() -> argparse.Namespace:
         choices=['sklearn', 'torch'],
         help='Causal weights trainer backend')
     parser.add_argument('--mag_pruner_amount', type=float,
-                        default=0.4, help='Magnitude pruning fraction')
+                        default=0.1, help='Magnitude pruning fraction')
     parser.add_argument(
         '--verbose', action=argparse.BooleanOptionalAction,
         default=True, help='Output verbosity')

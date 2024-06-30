@@ -27,9 +27,19 @@ class PrunerConfig:
 
 class Pruner(ABC):
 
+    _SUPPORTED_MODULES = [
+        nn.Linear,
+        nn.Conv1d,
+        nn.Conv2d,
+        nn.Conv3d,
+    ]
+
     @staticmethod
     def is_module_supported(module: nn.Module) -> bool:
-        return True
+        for supported_module in Pruner._SUPPORTED_MODULES:
+            if isinstance(module, supported_module):
+                return True
+        return False
 
     @staticmethod
     def get_children(model: nn.Module, root: str) -> dict[str, nn.Module]:

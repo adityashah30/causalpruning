@@ -116,20 +116,6 @@ class SGDPrunerConfig(PrunerConfig):
 
 class SGDPruner(Pruner):
 
-    _SUPPORTED_MODULES = [
-        nn.Linear,
-        nn.Conv1d,
-        nn.Conv2d,
-        nn.Conv3d,
-    ]
-
-    @staticmethod
-    def is_module_supported(module: nn.Module) -> bool:
-        for supported_module in SGDPruner._SUPPORTED_MODULES:
-            if isinstance(module, supported_module):
-                return True
-        return False
-
     def __init__(self, config: SGDPrunerConfig):
         super().__init__(config)
         self.counter = 0

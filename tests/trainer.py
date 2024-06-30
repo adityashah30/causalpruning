@@ -9,6 +9,12 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.tensorboard import SummaryWriter
+from torcheval.metrics import (
+    MulticlassAccuracy,
+    MulticlassPrecision,
+    MulticlassRecall,
+    MulticlassF1Score,
+)
 from tqdm.auto import tqdm
 
 from causalpruner import Pruner, best_device
@@ -18,6 +24,7 @@ from causalpruner import Pruner, best_device
 class DataConfig:
     train_dataset: Dataset
     test_dataset: Dataset
+    num_classes: int
     batch_size: int
     num_workers: int
     shuffle: bool
@@ -65,6 +72,14 @@ class AverageMeter:
         self.avg = self.sum / self.count
 
 
+@dataclass
+class EvalMetrics:
+    accuracy: torch.Tensor
+    precision: torch.Tensor
+    recall: torch.Tensor
+    f1_score: torch.Tensor
+
+
 class Trainer:
 
     def __init__(self, config: TrainerConfig, pruner: Optional[Pruner] = None):
@@ -110,6 +125,14 @@ class Trainer:
         if self.pruner is not None:
             self.pruner.apply_masks()
         self._checkpoint_model('trained')
+        eval_metrics = self.get_all_eval_metrics()
+        tqdm.write('\n======================================================\n')
+        tqdm.write('Final eval metrics:')
+        tqdm.write(f'Accuracy: {eval_metrics.accuracy}')
+        tqdm.write(f'Precision: {eval_metrics.precision}')
+        tqdm.write(f'Recall: {eval_metrics.recall}')
+        tqdm.write(f'F1 Score: {eval_metrics.f1_score}')
+        tqdm.write('\n======================================================\n')
 
     def _run_pre_prune(self):
         config = self.config
@@ -222,19 +245,48 @@ class Trainer:
     def eval_model(self) -> float:
         model = self.config.model
         model.eval()
-        total = 0
-        correct = 0
+        accuracy = MulticlassAccuracy().to(self.device)
         for data in self.testloader:
             inputs, labels = data
             inputs = inputs.to(self.device, non_blocking=True)
             labels = labels.to(self.device, non_blocking=True)
             outputs = model(inputs)
-            _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-        accuracy = correct / total
+            accuracy.update(outputs, labels)
+        accuracy = accuracy.compute().item()
         self.writer.add_scalar('Accuracy/Test', accuracy, self.global_step)
         return accuracy
+
+    @torch.no_grad
+    def get_all_eval_metrics(self) -> EvalMetrics:
+        model = self.config.model
+        model.eval()
+        accuracy = MulticlassAccuracy(
+            num_classes=self.data_config.num_classes,
+            average=None).to(self.device)
+        precision = MulticlassPrecision(
+            num_classes=self.data_config.num_classes,
+            average=None).to(self.device)
+        recall = MulticlassRecall(
+            num_classes=self.data_config.num_classes,
+            average=None).to(self.device)
+        f1_score = MulticlassF1Score(
+            num_classes=self.data_config.num_classes,
+            average=None).to(self.device)
+        for data in self.testloader:
+            inputs, labels = data
+            inputs = inputs.to(self.device, non_blocking=True)
+            labels = labels.to(self.device, non_blocking=True)
+            outputs = model(inputs)
+            accuracy.update(outputs, labels)
+            precision.update(outputs, labels)
+            recall.update(outputs, labels)
+            f1_score.update(outputs, labels)
+        eval_metrics = EvalMetrics(
+            accuracy=accuracy.compute(),
+            precision=precision.compute(),
+            recall=recall.compute(),
+            f1_score=f1_score.compute())
+        return eval_metrics
 
     @torch.no_grad
     def compute_prune_stats(self):
