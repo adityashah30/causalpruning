@@ -1,5 +1,5 @@
 from .cifar10 import get_cifar_10
-from .mnist import get_mnist
+from .fashion_mnist import get_fashion_mnist
 
 import torch.utils.data as data
 
@@ -13,7 +13,7 @@ def get_dataset(dataset_name: str,
     if dataset_name == 'cifar10':
         train, test = get_cifar_10(model_name, root_dir, recompute)
         return (train, test, 10)
-    elif dataset_name == 'mnist':
-        train, test = get_mnist(model_name, root_dir, recompute)
+    elif dataset_name == 'fashionmnist':
+        train, test = get_fashion_mnist(model_name, root_dir, recompute)
         return (train, test, 10)
     raise NotImplementedError(f'{dataset_name} not available.')

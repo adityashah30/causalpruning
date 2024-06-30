@@ -47,6 +47,6 @@ def get_lenet(dataset: str) -> nn.Module:
     dataset = dataset.lower()
     if dataset == 'cifar10':
         return LeNet(num_classes=10, size_input=(3, 32, 32))
-    elif dataset == 'mnist':
+    elif dataset == 'fashionmnist':
         return LeNet(num_classes=10, size_input=(1, 28, 28))
     raise NotImplementedError(f'Lenet is not available for {dataset}')

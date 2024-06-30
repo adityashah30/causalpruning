@@ -6,7 +6,7 @@ from torchvision.transforms import v2
 from tqdm.auto import trange
 
 
-class TransformedMNIST(datasets.MNIST):
+class TransformedFashionMNIST(datasets.FashionMNIST):
 
     _TRAIN_FPATH = 'train.pth'
     _TEST_FPATH = 'test.pth'
@@ -14,7 +14,7 @@ class TransformedMNIST(datasets.MNIST):
     def __init__(
             self, root: str, size: int, train: bool = True,
             recompute: bool = False, transforms: list[v2.Transform] = []):
-        mnist_root = os.path.join(root, 'mnist')
+        mnist_root = os.path.join(root, 'fashion_mnist')
 
         super().__init__(
             mnist_root, train, download=True,
@@ -59,21 +59,21 @@ class TransformedMNIST(datasets.MNIST):
 _DEFAULT_TRANSFORMS = [
     v2.ToImage(),
     v2.ToDtype(torch.float32, scale=True),
-    v2.Normalize(mean=(0.1307,), std=(0.3081,))
+    v2.Normalize(mean=(0.2860,), std=(0.3530,))
 ]
 
 
-def get_mnist(
+def get_fashion_mnist(
         model_name: str,
         root_dir: str,
         recompute: bool = False) -> tuple[data.Dataset, data.Dataset]:
     model_name = model_name.lower()
     if model_name in ['lenet', 'fullyconnected']:
-        train = TransformedMNIST(
+        train = TransformedFashionMNIST(
             root_dir, size=28, train=True, recompute=recompute,
             transforms=_DEFAULT_TRANSFORMS)
-        test = TransformedMNIST(
+        test = TransformedFashionMNIST(
             root_dir, size=28, train=False, recompute=recompute,
             transforms=_DEFAULT_TRANSFORMS)
         return (train, test)
-    raise NotImplementedError(f'CIFAR10 not available for {model_name}')
+    raise NotImplementedError(f'FashionMNIST not available for {model_name}')

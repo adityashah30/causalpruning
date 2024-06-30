@@ -40,6 +40,7 @@ class EpochConfig:
 
 @dataclass
 class TrainerConfig:
+    hparams: dict[str, str]
     model: nn.Module
     prune_optimizer: optim.Optimizer
     train_optimizer: optim.Optimizer
@@ -80,11 +81,10 @@ class EvalMetrics:
     f1_score: torch.Tensor
 
 
-def get_scalar_dict(t: torch.Tensor) -> dict[str, float]:
-    scalars = dict()
-    for idx, value in enumerate(t):
-        scalars[f'class_{idx}'] = value
-    return scalars
+def write_scalars(
+        writer: SummaryWriter, tag: str, val: torch.Tensor, global_step: int):
+    for idx, value in enumerate(val):
+        writer.add_scalar(f'{tag}/class_{idx}',  value, global_step)
 
 
 class Trainer:
@@ -103,6 +103,7 @@ class Trainer:
         self.pbar = tqdm(total=self.total_epochs)
         self.global_step = -1
         self.writer = SummaryWriter(config.tensorboard_dir)
+        self.writer.add_hparams(config.hparams, {})
         self._make_dataloaders()
         os.makedirs(config.checkpoint_dir, exist_ok=True)
 
@@ -296,14 +297,22 @@ class Trainer:
         tqdm.write(f'Recall: {eval_metrics.recall}')
         tqdm.write(f'F1 Score: {eval_metrics.f1_score}')
         tqdm.write('\n======================================================\n')
-        self.writer.add_scalars(
-            'Final/Accuracy', get_scalar_dict(eval_metrics.accuracy), self.global_step)
-        self.writer.add_scalars(
-            'Final/Precision', get_scalar_dict(eval_metrics.precision), self.global_step)
-        self.writer.add_scalars(
-            'Final/Recall', get_scalar_dict(eval_metrics.recall), self.global_step)
-        self.writer.add_scalars(
-            'Final/F1Score', get_scalar_dict(eval_metrics.f1_score), self.global_step)
+        write_scalars(self.writer,
+                      "Final/Accuracy",
+                      eval_metrics.accuracy,
+                      self.global_step)
+        write_scalars(self.writer,
+                      "Final/Precision",
+                      eval_metrics.precision,
+                      self.global_step)
+        write_scalars(self.writer,
+                      "Final/Recall",
+                      eval_metrics.recall,
+                      self.global_step)
+        write_scalars(self.writer,
+                      "Final/F1Score",
+                      eval_metrics.f1_score,
+                      self.global_step)
 
     @torch.no_grad
     def compute_prune_stats(self):

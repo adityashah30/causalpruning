@@ -49,6 +49,6 @@ def get_fully_connected(dataset: str) -> nn.Module:
     dataset = dataset.lower()
     if dataset == 'cifar10':
         return FullyConnected(num_classes=10, size_input=(3, 32, 32))
-    elif dataset == 'mnist':
+    elif dataset == 'fashionmnist':
         return FullyConnected(num_classes=10, size_input=(1, 28, 28))
     raise NotImplementedError(f'FullyConnected is not available for {dataset}')

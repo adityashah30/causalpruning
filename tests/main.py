@@ -34,7 +34,6 @@ from trainer import (
     TrainerConfig,
 )
 
-
 def get_prune_optimizer(
         name: str, model: nn.Module, lr: float, momentum: float) -> optim.Optimizer:
     name = name.lower()
@@ -44,12 +43,12 @@ def get_prune_optimizer(
 
 
 def get_train_optimizer(
-        name: str, model: nn.Module, lr: float) -> optim.Optimizer:
+        name: str, model: nn.Module, lr: float, momentum: float) -> optim.Optimizer:
     name = name.lower()
     if name == 'adam':
         return optim.Adam(model.parameters(), lr=lr)
     elif name == 'sgd':
-        return optim.SGD(model.parameters(), lr=lr)
+        return optim.SGD(model.parameters(), lr=lr, momentum=momentum)
     raise NotImplementedError(
         f'{name} is not a supported post-prune Optimizier')
 
@@ -70,16 +69,17 @@ def main(args):
     model_name = args.model
     dataset_name = args.dataset
     prune_identifier = pruner if prune else 'noprune'
-    identifier = f'{prune_identifier}_{model_name}_{dataset_name}'
+    momentum=args.momentum
+    identifier = f'{prune_identifier}_{model_name}_{dataset_name}_{momentum}'
     checkpoint_dir = os.path.join(args.checkpoint_dir, identifier)
     tensorboard_dir = os.path.join(args.tensorboard_dir, identifier)
     train_dataset, test_dataset, num_classes = get_dataset(
         dataset_name, model_name, args.dataset_root_dir, args.recompute_dataset)
     model = get_model(model_name, dataset_name).to(best_device())
     prune_optimizer = get_prune_optimizer(
-        args.optimizer, model, args.lr, args.momentum)
+        args.optimizer, model, args.lr, momentum)
     train_optimizer = get_train_optimizer(
-        args.train_optimizer, model, args.train_lr)
+        args.train_optimizer, model, args.train_lr, momentum)
     data_config = DataConfig(
         train_dataset=train_dataset, test_dataset=test_dataset,
         batch_size=args.batch_size, num_workers=args.num_dataset_workers,
@@ -90,7 +90,7 @@ def main(args):
         num_prune_epochs=args.num_prune_epochs if args.prune else 0,
         num_train_epochs=args.max_train_epochs)
     trainer_config = TrainerConfig(
-        model=model, prune_optimizer=prune_optimizer,
+        hparams=vars(args), model=model, prune_optimizer=prune_optimizer,
         train_optimizer=train_optimizer,
         train_convergence_loss_tolerance=args.train_convergence_loss_tolerance,
         train_loss_num_epochs_no_change=args.train_loss_num_epochs_no_change,
@@ -154,7 +154,7 @@ def parse_args() -> argparse.Namespace:
         help='Learning rate for the train optimizer')
     # Dataset args
     parser.add_argument('--dataset', type=str,
-                        choices=['cifar10', 'mnist'],
+                        choices=['cifar10', 'fashionmnist'],
                         default='cifar10', help='Dataset name')
     parser.add_argument(
         '--dataset_root_dir', type=str, default='../data',
