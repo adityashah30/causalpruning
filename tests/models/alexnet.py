@@ -1,5 +1,5 @@
 import torch.nn as nn
-import torch.nn.functional as F
+from torchvision.models import alexnet
 
 
 class AlexNet(nn.Module):
@@ -45,7 +45,5 @@ class AlexNet(nn.Module):
 
 
 def get_alexnet(dataset: str) -> nn.Module:
-    dataset = dataset.lower()
-    if dataset == 'cifar10':
-        return AlexNet(num_classes=10, size_input=(3, 64, 64))
-    raise NotImplementedError(f'AlexNet is not available for {dataset}')
+    return alexnet(num_classes=10)
+

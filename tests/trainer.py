@@ -224,6 +224,8 @@ class Trainer:
             loss = loss_avg.avg
             self.writer.add_scalar(
                 'Loss/train', loss, self.global_step)
+            if loss < best_loss:
+                best_loss = loss
             accuracy = self.eval_model()
             self.pbar.set_description(
                 f'Training: '
@@ -235,12 +237,9 @@ class Trainer:
                 iter_no_change += 1
             else:
                 iter_no_change = 0
-            if loss < best_loss:
-                best_loss = loss
             if iter_no_change >= config.train_loss_num_epochs_no_change:
                 tqdm.write(f'Model converged in {epoch+1} epochs')
                 break
-        self._checkpoint_model('trained')
 
     @torch.no_grad
     def eval_model(self) -> float:
