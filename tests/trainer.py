@@ -157,9 +157,9 @@ class Trainer:
                 'Loss/train', loss_avg.avg, self.global_step)
             accuracy = self.eval_model()
             self.pbar.set_description(
-                f'Pre-Prune: Epoch {epoch+1}/{epoch_config.num_pre_prune_epochs}' +
-                f'; Loss/Train: {loss_avg.avg:.4f}'
-                + f'; Accuracy/Test: {accuracy:.4f}')
+                f'Pre-Prune: Epoch {epoch+1}/{epoch_config.num_pre_prune_epochs}; ' +
+                f'Loss/Train: {loss_avg.avg:.4f}; ' +
+                f'Accuracy/Test: {accuracy:.4f}')
 
     def _run_prune(self):
         epoch_config = self.epoch_config
@@ -194,9 +194,10 @@ class Trainer:
             iter_str = f'{iteration+1}/{epoch_config.num_prune_iterations}'
             epoch_str = f'{epoch+1}/{epoch_config.num_prune_epochs}'
             self.pbar.set_description(
-                f'Prune: Iteration {iter_str}; Epoch: {epoch_str}'
-                + f'; Loss/Train: {loss_avg.avg:.4f}'
-                + f'; Accuracy/Test: {accuracy:.4f}')
+                f'Prune: Iteration {iter_str}; ' +
+                f'Epoch: {epoch_str}; ' +
+                f'Loss/Train: {loss_avg.avg:.4f}; ' +
+                f'Accuracy/Test: {accuracy:.4f}')
         self.pruner.compute_masks()
         self.compute_prune_stats()
         self.pruner.reset_weights()
@@ -224,19 +225,19 @@ class Trainer:
             loss = loss_avg.avg
             self.writer.add_scalar(
                 'Loss/train', loss, self.global_step)
-            if loss < best_loss:
-                best_loss = loss
             accuracy = self.eval_model()
             self.pbar.set_description(
-                f'Training: '
-                + f'Epoch {epoch+1}/{epoch_config.num_train_epochs}' +
-                f'; Loss/Train: {loss:.4f}' +
-                f'; Best Loss/Train: {best_loss:.4f}' +
-                f'; Accuracy/Test: {accuracy:.4f}')
+                f'Training: ' +
+                f'Epoch {epoch+1}/{epoch_config.num_train_epochs}; ' +
+                f'Loss/Train: {loss:.4f}; ' +
+                f'Best Loss/Train: {best_loss:.4f}; ' +
+                f'Accuracy/Test: {accuracy:.4f}')
             if loss > (best_loss - config.train_convergence_loss_tolerance):
                 iter_no_change += 1
             else:
                 iter_no_change = 0
+            if loss < best_loss:
+                best_loss = loss
             if iter_no_change >= config.train_loss_num_epochs_no_change:
                 tqdm.write(f'Model converged in {epoch+1} epochs')
                 break
@@ -339,7 +340,8 @@ class Trainer:
         all_params_percent = 100 * all_params_pruned / \
             (all_params_total + 1e-6)
         tqdm.write(f'Name: All; Total: {all_params_total}; '
-                   f'non-zero: {all_params_non_zero}; pruned: {all_params_pruned}; '
+                   f'non-zero: {all_params_non_zero}; ' + 
+                   f'pruned: {all_params_pruned}; '
                    f'percent: {all_params_percent:.2f}%')
         self.writer.add_scalar(
             f'all/pruned', all_params_pruned, self.global_step)
