@@ -25,11 +25,11 @@ dependencies:
   - brotli-python=1.1.0=py312h30efb56_1
   - bzip2=1.0.8=hd590300_5
   - c-ares=1.28.1=hd590300_0
-  - ca-certificates=2024.6.2=hbcca054_0
+  - ca-certificates=2024.7.4=hbcca054_0
   - cached-property=1.5.2=hd8ed1ab_1
   - cached_property=1.5.2=pyha770c72_1
   - cairo=1.18.0=h3faef2a_0
-  - certifi=2024.6.2=py312h06a4308_0
+  - certifi=2024.7.4=pyhd8ed1ab_0
   - cffi=1.16.0=py312hf06ca03_0
   - charset-normalizer=3.3.2=pyhd8ed1ab_0
   - colorama=0.4.6=pyhd8ed1ab_0
@@ -231,10 +231,11 @@ dependencies:
   - ocl-icd=2.3.2=hd590300_1
   - openh264=2.4.1=h59595ed_0
   - openjpeg=2.5.2=h488ebb8_0
-  - openssl=3.3.1=h4ab18f5_0
+  - openssl=3.3.1=h4ab18f5_1
   - overrides=7.7.0=pyhd8ed1ab_0
   - p11-kit=0.24.1=hc5aa10d_0
   - packaging=24.0=pyhd8ed1ab_0
+  - pandas=2.2.2=py312h1d6d2e6_1
   - pandoc=3.2=ha770c72_0
   - pandocfilters=1.5.0=pyhd8ed1ab_0
   - parso=0.8.4=pyhd8ed1ab_0
@@ -266,6 +267,7 @@ dependencies:
   - python-dateutil=2.9.0post0=py312h06a4308_2
   - python-fastjsonschema=2.19.1=pyhd8ed1ab_0
   - python-json-logger=2.0.7=pyhd8ed1ab_0
+  - python-tzdata=2024.1=pyhd8ed1ab_0
   - python_abi=3.12=4_cp312
   - pytorch=2.3.1=py3.12_cuda12.1_cudnn8.9.2_0
   - pytorch-cuda=12.1=ha16c6d3_5
@@ -297,6 +299,7 @@ dependencies:
   - svt-av1=2.1.0=hac33072_0
   - sympy=1.12=pypyh9d50eac_103
   - tbb=2021.12.0=h297d8ca_1
+  - tbparse=0.0.8=pyhd8ed1ab_0
   - tensorboard=2.16.2=pyhd8ed1ab_0
   - tensorboard-data-server=0.7.0=py312h241aef2_1
   - terminado=0.18.1=pyh0d859eb_0
