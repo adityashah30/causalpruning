@@ -33,6 +33,7 @@ class TransformedFashionMNIST(datasets.FashionMNIST):
 
         self.load_data()
 
+    @torch.no_grad
     def transform_and_save(self):
         data = []
         targets = []
@@ -44,11 +45,13 @@ class TransformedFashionMNIST(datasets.FashionMNIST):
         targets = torch.tensor(targets)
         torch.save({'data': data, 'targets': targets}, self.fpath)
 
+    @torch.no_grad
     def load_data(self):
         dict = torch.load(self.fpath)
         self.data = dict['data']
         self.targets = dict['targets']
 
+    @torch.no_grad
     def __getitem__(self, idx) -> tuple[torch.Tensor, torch.Tensor]:
         return self.data[idx], self.targets[idx]
 
@@ -63,6 +66,7 @@ _DEFAULT_TRANSFORMS = [
 ]
 
 
+@torch.no_grad
 def get_fashion_mnist(
         model_name: str,
         root_dir: str,

@@ -1,9 +1,11 @@
 from .cifar10 import get_cifar_10
 from .fashion_mnist import get_fashion_mnist
 
+import torch
 import torch.utils.data as data
 
 
+@torch.no_grad
 def get_dataset(dataset_name: str,
                 model_name: str,
                 root_dir: str,

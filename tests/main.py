@@ -8,6 +8,7 @@ sys.path.insert(
 # autopep: on
 
 import argparse
+import shutil
 
 import torch.nn as nn
 import torch.optim as optim
@@ -33,6 +34,12 @@ from trainer import (
     Trainer,
     TrainerConfig,
 )
+
+
+def delete_dir_if_exists(dir: str):
+    if os.path.exists(dir):
+        shutil.rmtree(dir)
+
 
 def get_prune_optimizer(
         name: str, model: nn.Module, lr: float, momentum: float) -> optim.Optimizer:
@@ -73,6 +80,9 @@ def main(args):
     identifier = f'{prune_identifier}_{model_name}_{dataset_name}_{momentum}'
     checkpoint_dir = os.path.join(args.checkpoint_dir, identifier)
     tensorboard_dir = os.path.join(args.tensorboard_dir, identifier)
+    if args.start_clean:
+        delete_dir_if_exists(checkpoint_dir)
+        delete_dir_if_exists(tensorboard_dir)
     train_dataset, test_dataset, num_classes = get_dataset(
         dataset_name, model_name, args.dataset_root_dir, args.recompute_dataset)
     model = get_model(model_name, dataset_name).to(best_device())

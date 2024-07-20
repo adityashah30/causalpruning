@@ -17,8 +17,7 @@ from models import get_model
 
 
 def get_accuracy_from_tb(df: pd.DataFrame) -> float:
-    accuracy = df[df.tag == 'Accuracy/Test'].value
-    return max(accuracy)
+    return 100 * df[df.tag == 'Accuracy/Test'].value.iat[-1]
 
 
 def get_pruned_percent_from_tb(df: pd.DataFrame) -> float:
@@ -42,7 +41,7 @@ def main(args: argparse.Namespace):
             root_dir, f'noprune_{model}_{dataset}_{momentum}')
     df = SummaryReader(no_prune_tb_dir).scalars
     accuracy = get_accuracy_from_tb(df)
-    print(f'NoPrune: {accuracy}')
+    print(f'NoPrune: {accuracy:.4f}%')
 
     # Causal Pruning
     causal_pruning_tb_dir = os.path.join(
@@ -50,7 +49,7 @@ def main(args: argparse.Namespace):
     df = SummaryReader(causal_pruning_tb_dir).scalars
     accuracy = get_accuracy_from_tb(df)
     pruned_percent = get_pruned_percent_from_tb(df)
-    print(f'CausalPruning: {accuracy}; Pruned Percent: {pruned_percent:.4f}%')
+    print(f'CausalPruning: {accuracy:.4f}%; Pruned Percent: {pruned_percent:.4f}%')
 
     # Mag Pruning
     mag_pruning_tb_dir = os.path.join(
@@ -58,7 +57,7 @@ def main(args: argparse.Namespace):
     df = SummaryReader(mag_pruning_tb_dir).scalars
     accuracy = get_accuracy_from_tb(df)
     pruned_percent = get_pruned_percent_from_tb(df)
-    print(f'MagPruning: {accuracy}; Pruned Percent: {pruned_percent:.4f}%')
+    print(f'MagPruning: {accuracy:.4f}%; Pruned Percent: {pruned_percent:.4f}%')
 
 
 

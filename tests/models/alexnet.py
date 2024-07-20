@@ -30,6 +30,19 @@ class AlexNet(nn.Module):
             nn.ReLU(inplace=True),
             nn.Linear(4096, num_classes),
         )
+        rand_genarator = torch.Generator().manual_seed(56)
+        # initialize weights using kaiming normal
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(
+                    m.weight,
+                    mode="fan_out",
+                    nonlinearity="relu",
+                    generator=rand_genarator,
+                )
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.features(x)

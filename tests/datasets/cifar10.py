@@ -43,6 +43,7 @@ class TransformedCIFAR10(datasets.CIFAR10):
                 return False
         return True
 
+    @torch.no_grad
     def transform_and_save(self):
         num_items = super().__len__()
         items_per_shard = (num_items + self.num_shards - 1) // self.num_shards
@@ -62,6 +63,7 @@ class TransformedCIFAR10(datasets.CIFAR10):
             shard_path = self.fpath + f'.{shard_index}'
             torch.save({'data': data, 'targets': targets}, shard_path)
 
+    @torch.no_grad
     def load_data(self,):
         self.shards_data = []
         for shard_idx in range(self.num_shards):
@@ -69,7 +71,7 @@ class TransformedCIFAR10(datasets.CIFAR10):
             dict = torch.load(fpath)
             self.shards_data.append(dict)
 
-
+    @torch.no_grad
     def __getitem__(self, idx) -> tuple[torch.Tensor, torch.Tensor]:
         num_items = super().__len__()
         assert idx <= num_items
@@ -100,6 +102,7 @@ _DEFAULT_TEST_TRANSFORMS = [
 ]
 
 
+@torch.no_grad
 def get_cifar_10(
         model_name: str,
         root_dir: str,
