@@ -76,8 +76,14 @@ def main(args):
     model_name = args.model
     dataset_name = args.dataset
     prune_identifier = pruner if prune else 'noprune'
+    if prune_identifier == 'causalpruner':
+        iteration_id = f'{args.num_prune_iterations}_{args.num_prune_epochs}'
+        alpha_id = f'{args.causal_pruner_l1_regularization_coeff}'
+        prune_identifier += f'_{iteration_id}_{alpha_id}'
+    elif prune_identifier == 'magpruner':
+        prune_identifier += f'_{args.mag_pruner_amount}'
     momentum=args.momentum
-    identifier = f'{prune_identifier}_{model_name}_{dataset_name}_{momentum}'
+    identifier = f'{model_name}_{dataset_name}_{prune_identifier}'
     checkpoint_dir = os.path.join(args.checkpoint_dir, identifier)
     tensorboard_dir = os.path.join(args.tensorboard_dir, identifier)
     if args.start_clean:
