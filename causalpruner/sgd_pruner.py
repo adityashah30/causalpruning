@@ -209,11 +209,8 @@ class SGDPruner(Pruner):
         if batch_size < 0 or not trainer.supports_batch_training():
             batch_size = len(dataset)
         dataloader = DataLoader(
-            dataset, batch_size=batch_size, pin_memory=True)
-        pbar_prune = tqdm(dataloader, leave=False)
-        for idx, (delta_params, delta_losses) in enumerate(pbar_prune):
-            pbar_prune.set_description(f'Pruning {param}/{idx}')
-            num_iters = trainer.fit(delta_params, delta_losses)
+            dataset, batch_size=batch_size, pin_memory=True, shuffle=True)
+        num_iters = trainer.fit(dataloader)
         if num_iters == self.trainer_config.max_iter:
             tqdm.write(f'{param} pruning failed to converge in ' +
                        f'{num_iters} steps. Consider increasing ' +

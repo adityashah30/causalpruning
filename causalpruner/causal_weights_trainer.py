@@ -7,6 +7,7 @@ from sklearn.linear_model import SGDRegressor
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from causalpruner.lasso_optimizer import LassoSGD
@@ -49,7 +50,7 @@ class CausalWeightsTrainer(ABC):
         raise NotImplementedError('Use the sklearn or pytorch version')
 
     @abstractmethod
-    def fit(self, X: torch.Tensor, Y: torch.Tensor) -> int:
+    def fit(self, dataloader: DataLoader) -> int:
         raise NotImplementedError('Use the sklearn or pytorch version')
 
     @abstractmethod
@@ -78,7 +79,8 @@ class CausalWeightsTrainerSklearn(CausalWeightsTrainer):
     def supports_batch_training(self) -> bool:
         return False
 
-    def fit(self, X: torch.Tensor, Y: torch.Tensor) -> int:
+    def fit(self, dataloader: DataLoader) -> int:
+        X, Y = next(iter(dataloader))
         X = X.detach().cpu().numpy()
         Y = Y.detach().cpu().numpy()
         self.trainer.fit(X, Y)
@@ -114,24 +116,26 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
         nn.init.zeros_(self.layer.weight)
         self.optimizer.reset()
 
-    def fit(self, X: torch.Tensor, Y: torch.Tensor) -> int:
+    def fit(self, dataloader: DataLoader) -> int:
         self.layer.train()
-        X = X.to(device=self.device, non_blocking=True)
-        Y = Y.to(device=self.device, non_blocking=True)
-        num_items = X.shape[0]
         best_loss = np.inf
         iter_no_change = 0
+        pbar_prune = tqdm(dataloader, leave=False)
         for iter in range(self.max_iter):
             sumloss = 0.0
-            indices = torch.randperm(num_items)
-            for idx in indices:
-                output = self.layer(X[idx])
-                label = Y[idx].view(-1)
-                loss = 0.5 * F.mse_loss(output, label, reduction='sum')
-                loss.backward()
-                self.optimizer.step()
-                self.optimizer.zero_grad()
-                sumloss += loss.item()
+            for idx, (X, Y) in enumerate(pbar_prune):
+                pbar_prune.set_description(f'Pruning {self.param_name}/{idx}')
+                X = X.to(device=self.device, non_blocking=True)
+                Y = Y.to(device=self.device, non_blocking=True)
+                num_items = X.shape[0]
+                for idx in range(num_items):
+                    output = self.layer(X[idx])
+                    label = Y[idx].view(-1)
+                    loss = 0.5 * F.mse_loss(output, label, reduction='sum')
+                    loss.backward()
+                    self.optimizer.step()
+                    self.optimizer.zero_grad()
+                    sumloss += loss.item()
             if sumloss > (best_loss - self.loss_tol):
                 iter_no_change += 1
             else:
