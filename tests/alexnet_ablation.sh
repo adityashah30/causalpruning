@@ -8,6 +8,8 @@ alphas=(1e-16 1e-17 1e-18 1e-19)
 
 echo "Running Alexnet ablation studies on CIFAR10"
 
+python main.py --model=alexnet --dataset=cifar10 --no-prune
+
 for iter in ${num_iterations[@]};
 do
     for prune_epochs in ${num_prune_epochs[@]};

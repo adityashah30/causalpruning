@@ -8,6 +8,8 @@ alphas=(1e-14 1e-15 1e-16 1e-17)
 
 echo "Running LeNet ablation studies on Fashion-MNIST"
 
+python main.py --model=lenet --dataset=fashionmnist --no-prune
+
 for iter in ${num_iterations[@]}; 
 do
     for prune_epochs in ${num_prune_epochs[@]}; 
