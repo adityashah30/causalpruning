@@ -113,7 +113,8 @@ def main(args):
         train_loss_num_epochs_no_change=args.train_loss_num_epochs_no_change,
         data_config=data_config, epoch_config=epoch_config,
         tensorboard_dir=tensorboard_dir,checkpoint_dir=checkpoint_dir,
-        verbose=args.verbose)
+        verbose=args.verbose,
+        device=best_device(device_id))
     pruner = None
     if args.prune:
         if args.pruner == 'causalpruner':
