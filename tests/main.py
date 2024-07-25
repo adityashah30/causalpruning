@@ -91,7 +91,8 @@ def main(args):
         delete_dir_if_exists(tensorboard_dir)
     train_dataset, test_dataset, num_classes = get_dataset(
         dataset_name, model_name, args.dataset_root_dir, args.recompute_dataset)
-    model = get_model(model_name, dataset_name).to(best_device())
+    device_id = args.device_id
+    model = get_model(model_name, dataset_name).to(best_device(device_id))
     prune_optimizer = get_prune_optimizer(
         args.optimizer, model, args.lr, momentum)
     train_optimizer = get_train_optimizer(
@@ -133,7 +134,7 @@ def main(args):
                 preload=args.causal_pruner_preload,
                 trainer_config=causal_weights_trainer_config,
                 delete_checkpoint_dir_after_training=args.delete_checkpoint_dir_after_training,
-                device=best_device())
+                device=best_device(device_id))
         elif args.pruner == 'magpruner':
             pruner_config = MagPrunerConfig(
                 model=model,
@@ -141,7 +142,7 @@ def main(args):
                 checkpoint_dir=checkpoint_dir,
                 start_clean=args.start_clean,
                 prune_amount=args.mag_pruner_amount,
-                device=best_device())
+                device=best_device(device_id))
         pruner = get_pruner(pruner_config)
     trainer = Trainer(trainer_config, pruner)
     trainer.run()
@@ -150,6 +151,10 @@ def main(args):
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Causal Pruning')
 
+    parser.add_argument('--device_id',
+                        type=int,
+                        default=0,
+                        help='The device id. Useful for multi device systems')
     # Model args
     parser.add_argument('--model', type=str,
                         choices=['alexnet', 'lenet', 'resnet18'],

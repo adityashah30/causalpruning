@@ -22,7 +22,7 @@ class CausalWeightsTrainerConfig:
     loss_tol: float
     num_iter_no_change: int
     param_name: str = ''
-    backend: Literal['sklearn', 'torch'] = 'sklearn'
+    backend: Literal['sklearn', 'torch'] = 'torch'
 
 
 class CausalWeightsTrainer(ABC):

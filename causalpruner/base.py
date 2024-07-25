@@ -9,11 +9,11 @@ import torch.nn as nn
 import torch.nn.utils.prune as prune
 
 
-def best_device() -> torch.device:
-    device = torch.device('cpu')
-    if torch.cuda.is_available():
-        device = torch.device('cuda')
-    return device
+def best_device(identifier: Union[None, int] = None) -> torch.device:
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    if identifier is not None:
+        device = f'{device}:{identifier}'
+    return torch.device(device)
 
 
 @dataclass
@@ -46,7 +46,7 @@ class Pruner(ABC):
         children = dict()
         for name, module in model.named_children():
             root_name = root + '_' + name
-            if isinstance(module, nn.Sequential):
+            if not Pruner.is_module_supported(module):
                 children.update(Pruner.get_children(module, root_name))
             else:
                 children[root_name] = module
