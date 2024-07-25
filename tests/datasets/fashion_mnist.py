@@ -89,4 +89,13 @@ def get_fashion_mnist(
             root_dir, size=227, train=False, recompute=recompute,
             transforms=TRANSFORMS)
         return (train, test)
+    elif model_name == 'resnet18':
+        TRANSFORMS = [v2.Resize((224, 224))] + _DEFAULT_TRANSFORMS
+        train = TransformedFashionMNIST(
+            root_dir, size=224, train=True, recompute=recompute,
+            transforms=TRANSFORMS)
+        test = TransformedFashionMNIST(
+            root_dir, size=224, train=False, recompute=recompute,
+            transforms=TRANSFORMS)
+        return (train, test)
     raise NotImplementedError(f'FashionMNIST not available for {model_name}')

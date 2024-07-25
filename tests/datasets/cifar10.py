@@ -125,4 +125,12 @@ def get_cifar_10(
             root_dir, size=227, train=False, recompute=recompute,
             transforms=[v2.Resize((227, 227))] + _DEFAULT_TEST_TRANSFORMS)
         return (train, test)
+    elif model_name == 'resnet18':
+        train = TransformedCIFAR10(
+            root_dir, size=224, train=True, recompute=recompute,
+            transforms=[v2.Resize((224, 224))] + _DEFAULT_TRAIN_TRANSFORMS)
+        test = TransformedCIFAR10(
+            root_dir, size=224, train=False, recompute=recompute,
+            transforms=[v2.Resize((224, 224))] + _DEFAULT_TEST_TRANSFORMS)
+        return (train, test)
     raise NotImplementedError(f'CIFAR10 not available for {model_name}')

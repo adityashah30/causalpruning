@@ -4,7 +4,7 @@ mkdir -p ../tensorboard
 
 num_iterations=(2 5 10 20)
 num_prune_epochs=(2 5 10 20)
-alphas=(1e-16 1e-17 1e-18 1e-19)
+alphas=(1e-15 1e-16 1e-17 1e-18)
 
 echo "Running Alexnet ablation studies on CIFAR10"
 
