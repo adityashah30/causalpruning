@@ -132,6 +132,7 @@ def main(args):
                 checkpoint_dir=checkpoint_dir,
                 start_clean=args.start_clean,
                 batch_size=args.causal_pruner_batch_size,
+                multiprocess_checkpoint_writer=args.causal_pruner_multiprocessing_checkpoint_writer,
                 preload=args.causal_pruner_preload,
                 trainer_config=causal_weights_trainer_config,
                 delete_checkpoint_dir_after_training=args.delete_checkpoint_dir_after_training,
@@ -220,7 +221,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--pruner', type=str, default='causalpruner',
         help='Method for pruning', choices=['causalpruner', 'magpruner'])
-
+    parser.add_argument('--causal_pruner_multiprocessing_checkpoint_writer',
+                         action=argparse.BooleanOptionalAction,
+                         default=True,
+                         help='Controls if weights are written using a ProcessPoolExecutor')
     parser.add_argument(
         '--start_clean', action=argparse.BooleanOptionalAction,
         default=True,

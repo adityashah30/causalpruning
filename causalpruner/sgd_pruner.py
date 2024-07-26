@@ -110,6 +110,7 @@ class ParamDataset(Dataset):
 class SGDPrunerConfig(PrunerConfig):
     preload: bool
     batch_size: int
+    multiprocess_checkpoint_writer: bool
     delete_checkpoint_dir_after_training: bool
     trainer_config: CausalWeightsTrainerConfig
 
@@ -121,9 +122,11 @@ class SGDPruner(Pruner):
         self.counter = 0
         self.trainer_config = config.trainer_config
         self.causal_weights_trainers = dict()
-        self.checkpointer = ProcessPoolExecutor(
-            max_workers=min(psutil.cpu_count() - 2, 6))
-        self.checkpoint_futures = []
+        self.multiprocess_checkpoint_writer = config.multiprocess_checkpoint_writer
+        if self.multiprocess_checkpoint_writer:
+            self.checkpointer = ProcessPoolExecutor(
+                max_workers=min(psutil.cpu_count() - 2, 6))
+            self.checkpoint_futures = []
         for param_name in self.params:
             trainer_config_copy = copy.deepcopy(self.trainer_config)
             trainer_config_copy.param_name = param_name
@@ -150,6 +153,10 @@ class SGDPruner(Pruner):
 
     @torch.no_grad
     def write_tensor(self, tensor: torch.Tensor, path: str):
+        if not self.multiprocess_checkpoint_writer:
+            torch.save(tensor, path)
+            return
+        # Use multiprocessing to write checkpoint
         while psutil.virtual_memory().percent >= 99.5:
             time.sleep(0.1)  # 100ms
         future = self.checkpointer.submit(torch.save, tensor, path)
@@ -163,7 +170,8 @@ class SGDPruner(Pruner):
 
     def train_pruning_weights(self) -> None:
         params = self.param_checkpoint_dirs.items()
-        concurrent.futures.wait(self.checkpoint_futures)
+        if self.multiprocess_checkpoint_writer:
+            concurrent.futures.wait(self.checkpoint_futures)
         pbar_pruning = tqdm(total=len(params), leave=False)
         for param, param_dir in params:
             pbar_pruning.set_description(param)
