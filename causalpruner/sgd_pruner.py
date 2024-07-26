@@ -150,7 +150,7 @@ class SGDPruner(Pruner):
 
     @torch.no_grad
     def write_tensor(self, tensor: torch.Tensor, path: str):
-        while psutil.virtual_memory().percent >= 95:
+        while psutil.virtual_memory().percent >= 99.5:
             time.sleep(0.1)  # 100ms
         future = self.checkpointer.submit(torch.save, tensor, path)
         self.checkpoint_futures.append(future)
