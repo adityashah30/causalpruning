@@ -15,7 +15,7 @@ def get_imagenet(
         transforms = ResNet50_Weights.IMAGENET1K_V2.transforms
         train = ImageNet(root=imagenet_root, split='train',
                          transform=transforms)
-        test = ImageNet(root=imagenet_root, split='test',
+        test = ImageNet(root=imagenet_root, split='val',
                         transforms=transforms)
         return (train, test)
     raise NotImplementedError(f'CIFAR10 not available for {model_name}')
