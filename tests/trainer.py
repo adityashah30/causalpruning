@@ -36,6 +36,10 @@ class EpochConfig:
     num_prune_iterations: int
     num_prune_epochs: int
     num_train_epochs: int
+    # Number of steps to run while pruning. Note that we run over the entire
+    # dataset by default -- which will happen for any value < 0.
+    # Use a positive value to limit pruning to a specific number of batches.
+    num_prune_epoch_steps: int = -1
 
 
 @dataclass
@@ -171,12 +175,14 @@ class Trainer:
     def _run_prune_iteration(self, iteration):
         config = self.config
         epoch_config = self.epoch_config
+        num_prune_epoch_steps = epoch_config.num_prune_epoch_steps
         self.pruner.start_iteration()
         for epoch in range(epoch_config.num_prune_epochs):
             self.global_step += 1
             self.pbar.update(1)
             config.model.train()
             loss_avg = AverageMeter()
+            prune_steps_counter = 0
             for data in self.trainloader:
                 inputs, labels = data
                 inputs = inputs.to(self.device, non_blocking=True)
@@ -188,6 +194,10 @@ class Trainer:
                 config.prune_optimizer.step()
                 config.prune_optimizer.zero_grad()
                 loss_avg.update(loss.item(), inputs.size(0))
+                prune_steps_counter += 1
+                if (num_prune_epoch_steps > 0 and
+                        prune_steps_counter >= num_prune_epoch_steps):
+                    break
             self.writer.add_scalar(
                 'Loss/train', loss_avg.avg, self.global_step)
             accuracy = self.eval_model()
@@ -340,7 +350,7 @@ class Trainer:
         all_params_percent = 100 * all_params_pruned / \
             (all_params_total + 1e-6)
         tqdm.write(f'Name: All; Total: {all_params_total}; '
-                   f'non-zero: {all_params_non_zero}; ' + 
+                   f'non-zero: {all_params_non_zero}; ' +
                    f'pruned: {all_params_pruned}; '
                    f'percent: {all_params_percent:.2f}%')
         self.writer.add_scalar(

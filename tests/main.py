@@ -105,7 +105,8 @@ def main(args):
         num_pre_prune_epochs=args.num_pre_prune_epochs if args.prune else 0,
         num_prune_iterations=args.num_prune_iterations if args.prune else 0,
         num_prune_epochs=args.num_prune_epochs if args.prune else 0,
-        num_train_epochs=args.max_train_epochs)
+        num_train_epochs=args.max_train_epochs,
+        num_prune_epoch_steps=args.num_prune_epoch_steps)
     trainer_config = TrainerConfig(
         hparams=vars(args), model=model, prune_optimizer=prune_optimizer,
         train_optimizer=train_optimizer,
@@ -159,7 +160,7 @@ def parse_args() -> argparse.Namespace:
                         help='The device id. Useful for multi device systems')
     # Model args
     parser.add_argument('--model', type=str,
-                        choices=['alexnet', 'lenet', 'resnet18'],
+                        choices=['alexnet', 'lenet', 'resnet18', 'resnet50'],
                         default='lenet', help='Model name')
     parser.add_argument('--train_convergence_loss_tolerance', type=float,
                         default=1e-4,
@@ -177,7 +178,7 @@ def parse_args() -> argparse.Namespace:
         help='Learning rate for the train optimizer')
     # Dataset args
     parser.add_argument('--dataset', type=str,
-                        choices=['cifar10', 'fashionmnist'],
+                        choices=['cifar10', 'fashionmnist', 'imagenet'],
                         default='cifar10', help='Dataset name')
     parser.add_argument(
         '--dataset_root_dir', type=str, default='../data',
@@ -213,6 +214,8 @@ def parse_args() -> argparse.Namespace:
                         help='Number of iterations to prune')
     parser.add_argument('--num_prune_epochs', type=int, default=10,
                         help='Number of epochs for pruning')
+    parser.add_argument('--num_prune_epoch_steps', type=int, default=-1,
+                        help='Number of steps per pruning epochs. Runs the entire epoch by default')
     parser.add_argument('--optimizer', type=str,
                         default='sgd', help='Optimizer', choices=['sgd'])
     parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate')

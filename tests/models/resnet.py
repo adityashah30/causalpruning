@@ -1,5 +1,9 @@
 import torch
 import torch.nn as nn
+from torchvision.models import (
+    resnet50,
+    ResNet50_Weights,
+)
 
 
 class BasicBlock(nn.Module):
@@ -95,3 +99,11 @@ def get_resnet18(dataset: str) -> nn.Module:
         model = initialize_model_weights(model)
         return model
     raise NotImplementedError(f'Resnet18 is not available for {dataset}')
+
+
+def get_resnet50(dataset: str) -> nn.Module:
+    dataset = dataset.lower()
+    if dataset == 'imagenet':
+        model = resnet50(ResNet50_Weights.IMAGENET1K_V2)
+        return model
+    raise NotImplementedError(f'Resnet50 is not available for {dataset}')

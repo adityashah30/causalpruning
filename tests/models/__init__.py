@@ -1,6 +1,9 @@
 from .alexnet import get_alexnet
 from .lenet import get_lenet
-from .resnet import get_resnet18
+from .resnet import (
+    get_resnet18,
+    get_resnet50,
+)
 
 import torch.nn as nn
 
@@ -13,5 +16,7 @@ def get_model(model_name: str, dataset_name: str) -> nn.Module:
         return get_alexnet(dataset_name)
     elif model_name == 'resnet18':
         return get_resnet18(dataset_name)
+    elif model_name == 'resnet50':
+        return get_resnet50(dataset_name)
     raise NotImplementedError(
         f'{model_name} is not implemented in the test suite')
