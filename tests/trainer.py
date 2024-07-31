@@ -180,7 +180,6 @@ class Trainer:
     def _run_prune_iteration(self, iteration):
         config = self.config
         epoch_config = self.epoch_config
-        num_prune_epoch_steps = epoch_config.num_prune_epoch_steps
         self.pruner.start_iteration()
         for epoch in range(epoch_config.num_prune_epochs):
             self.global_step += 1
