@@ -15,16 +15,16 @@ class BasicBlock(nn.Module):
         super().__init__()
         self.conv1 = nn.Conv2d(
             in_channels, out_channels, kernel_size=3, stride=stride, padding=1,
-            bias=False)
+            bias=True)
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = nn.Conv2d(
             out_channels, out_channels, kernel_size=3, stride=1, padding=1,
-            bias=False)
+            bias=True)
         self.downsample = None
         if downsample:
             self.downsample = nn.Conv2d(
                 in_channels, out_channels, kernel_size=1, stride=stride,
-                bias=False)
+                bias=True)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         identity = x.clone()
@@ -42,7 +42,7 @@ class Resnet18(nn.Module):
         super().__init__()
         self.conv1 = nn.Conv2d(
             3, 64, kernel_size=7, stride=2, padding=(3, 3),
-            bias=False)
+            bias=True)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.layer1 = nn.Sequential(

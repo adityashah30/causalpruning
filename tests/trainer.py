@@ -36,10 +36,10 @@ class EpochConfig:
     num_prune_iterations: int
     num_prune_epochs: int
     num_train_epochs: int
-    # Number of steps to run while pruning. Note that we run over the entire
+    # Number of steps to run the dataloader. Note that we run over the entire
     # dataset by default -- which will happen for any value < 0.
-    # Use a positive value to limit pruning to a specific number of batches.
-    num_prune_epoch_steps: int = -1
+    # Use a positive value to limit iterating to a specific number of batches.
+    num_batches_in_epoch: int = -1
 
 
 @dataclass
@@ -147,6 +147,7 @@ class Trainer:
             self.pbar.update(1)
             config.model.train()
             loss_avg = AverageMeter()
+            num_batches = 0
             for data in self.trainloader:
                 inputs, labels = data
                 inputs = inputs.to(self.device, non_blocking=True)
@@ -157,6 +158,10 @@ class Trainer:
                 config.prune_optimizer.step()
                 config.prune_optimizer.zero_grad()
                 loss_avg.update(loss.item(), inputs.size(0))
+                num_batches += 1
+                if (epoch_config.num_batches_in_epoch > 0 and
+                        num_batches >= epoch_config.num_batches_in_epoch):
+                    break
             self.writer.add_scalar(
                 'Loss/train', loss_avg.avg, self.global_step)
             accuracy = self.eval_model()
@@ -182,7 +187,7 @@ class Trainer:
             self.pbar.update(1)
             config.model.train()
             loss_avg = AverageMeter()
-            prune_steps_counter = 0
+            num_batches = 0
             for data in self.trainloader:
                 inputs, labels = data
                 inputs = inputs.to(self.device, non_blocking=True)
@@ -194,9 +199,9 @@ class Trainer:
                 config.prune_optimizer.step()
                 config.prune_optimizer.zero_grad()
                 loss_avg.update(loss.item(), inputs.size(0))
-                prune_steps_counter += 1
-                if (num_prune_epoch_steps > 0 and
-                        prune_steps_counter >= num_prune_epoch_steps):
+                num_batches += 1
+                if (epoch_config.num_batches_in_epoch > 0 and
+                        num_batches >= epoch_config.num_batches_in_epoch):
                     break
             self.writer.add_scalar(
                 'Loss/train', loss_avg.avg, self.global_step)
@@ -222,6 +227,7 @@ class Trainer:
             self.pbar.update(1)
             config.model.train()
             loss_avg = AverageMeter()
+            num_batches = 0
             for data in self.trainloader:
                 inputs, labels = data
                 inputs = inputs.to(self.device, non_blocking=True)
@@ -232,6 +238,10 @@ class Trainer:
                 config.train_optimizer.step()
                 config.train_optimizer.zero_grad()
                 loss_avg.update(loss.item(), inputs.size(0))
+                num_batches += 1
+                if (epoch_config.num_batches_in_epoch > 0 and
+                        num_batches >= epoch_config.num_batches_in_epoch):
+                    break
             loss = loss_avg.avg
             self.writer.add_scalar(
                 'Loss/train', loss, self.global_step)

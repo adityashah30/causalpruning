@@ -106,7 +106,7 @@ def main(args):
         num_prune_iterations=args.num_prune_iterations if args.prune else 0,
         num_prune_epochs=args.num_prune_epochs if args.prune else 0,
         num_train_epochs=args.max_train_epochs,
-        num_prune_epoch_steps=args.num_prune_epoch_steps)
+        num_epoch_steps=args.num_epoch_steps)
     trainer_config = TrainerConfig(
         hparams=vars(args), model=model, prune_optimizer=prune_optimizer,
         train_optimizer=train_optimizer,
