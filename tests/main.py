@@ -106,7 +106,7 @@ def main(args):
         num_prune_iterations=args.num_prune_iterations if args.prune else 0,
         num_prune_epochs=args.num_prune_epochs if args.prune else 0,
         num_train_epochs=args.max_train_epochs,
-        num_epoch_steps=args.num_epoch_steps)
+        num_batches_in_epoch=args.num_batches_in_epoch)
     trainer_config = TrainerConfig(
         hparams=vars(args), model=model, prune_optimizer=prune_optimizer,
         train_optimizer=train_optimizer,
@@ -214,8 +214,8 @@ def parse_args() -> argparse.Namespace:
                         help='Number of iterations to prune')
     parser.add_argument('--num_prune_epochs', type=int, default=10,
                         help='Number of epochs for pruning')
-    parser.add_argument('--num_prune_epoch_steps', type=int, default=-1,
-                        help='Number of steps per pruning epochs. Runs the entire epoch by default')
+    parser.add_argument('--num_batches_in_epoch', type=int, default=-1,
+                        help='Number of batches per epoch. Runs the entire epoch by default')
     parser.add_argument('--optimizer', type=str,
                         default='sgd', help='Optimizer', choices=['sgd'])
     parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate')
