@@ -22,6 +22,7 @@ class PrunerConfig:
     model: nn.Module
     checkpoint_dir: str
     start_clean: bool
+    eval_after_epoch: bool
     device: Union[str, torch.device]
 
 

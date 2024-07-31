@@ -137,6 +137,7 @@ def main(args):
                 preload=args.causal_pruner_preload,
                 trainer_config=causal_weights_trainer_config,
                 delete_checkpoint_dir_after_training=args.delete_checkpoint_dir_after_training,
+                eval_after_epoch=args.eval_after_epoch,
                 device=best_device(device_id))
         elif args.pruner == 'magpruner':
             pruner_config = MagPrunerConfig(
@@ -144,6 +145,7 @@ def main(args):
                 pruner='MagPruner',
                 checkpoint_dir=checkpoint_dir,
                 start_clean=args.start_clean,
+                eval_after_epoch = args.eval_after_epoch,
                 prune_amount=args.mag_pruner_amount,
                 device=best_device(device_id))
         pruner = get_pruner(pruner_config)
@@ -220,7 +222,10 @@ def parse_args() -> argparse.Namespace:
                         default='sgd', help='Optimizer', choices=['sgd'])
     parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate')
     parser.add_argument('--momentum', type=float, default=0.0, help='Momentum')
-
+    parser.add_argument(
+        '--eval_after_epoch', action=argparse.BooleanOptionalAction,
+        default=True,
+        help='Eval after each pruning epoch')
     parser.add_argument(
         '--pruner', type=str, default='causalpruner',
         help='Method for pruning', choices=['causalpruner', 'magpruner'])
