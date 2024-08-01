@@ -231,7 +231,7 @@ def parse_args() -> argparse.Namespace:
         help='Method for pruning', choices=['causalpruner', 'magpruner'])
     parser.add_argument('--causal_pruner_multiprocessing_checkpoint_writer',
                          action=argparse.BooleanOptionalAction,
-                         default=True,
+                         default=False,
                          help='Controls if weights are written using a ProcessPoolExecutor')
     parser.add_argument(
         '--start_clean', action=argparse.BooleanOptionalAction,

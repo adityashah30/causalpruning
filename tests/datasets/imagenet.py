@@ -15,7 +15,6 @@ def get_imagenet(
         transforms = v2.Compose([
             v2.RandomResizedCrop(224),
             v2.RandomHorizontalFlip(),
-            v2.ToImage(),
             v2.ToDtype(torch.float32, scale=True),
             v2.Normalize(
                 mean=[0.485, 0.456, 0.406],

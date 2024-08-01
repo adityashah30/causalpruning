@@ -146,13 +146,13 @@ class SGDPruner(Pruner):
         self.write_tensor(loss, self._get_checkpoint_path('loss'))
         for param in self.params:
             module = self.modules_dict[param]
-            weight = module.weight.detach().cpu()
-            weight = torch.flatten(weight)
+            weight = module.weight.detach().to(device='cpu', non_blocking=True)
             self.write_tensor(weight, self._get_checkpoint_path(param))
         self.counter += 1
 
     @torch.no_grad
     def write_tensor(self, tensor: torch.Tensor, path: str):
+        tensor = torch.flatten(tensor)
         if not self.multiprocess_checkpoint_writer:
             torch.save(tensor, path)
             return
