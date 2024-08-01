@@ -156,7 +156,7 @@ class Trainer:
                 loss = config.loss_fn(outputs, labels)
                 loss.backward()
                 config.prune_optimizer.step()
-                config.prune_optimizer.zero_grad()
+                config.prune_optimizer.zero_grad(set_to_none=True)
                 loss_avg.update(loss.item(), inputs.size(0))
                 num_batches += 1
                 if (epoch_config.num_batches_in_epoch > 0 and
@@ -196,7 +196,7 @@ class Trainer:
                 self.pruner.provide_loss(loss)
                 loss.backward()
                 config.prune_optimizer.step()
-                config.prune_optimizer.zero_grad()
+                config.prune_optimizer.zero_grad(set_to_none=True)
                 loss_avg.update(loss.item(), inputs.size(0))
                 num_batches += 1
                 if (epoch_config.num_batches_in_epoch > 0 and
@@ -237,7 +237,7 @@ class Trainer:
                 loss = config.loss_fn(outputs, labels)
                 loss.backward()
                 config.train_optimizer.step()
-                config.train_optimizer.zero_grad()
+                config.train_optimizer.zero_grad(set_to_none=True)
                 loss_avg.update(loss.item(), inputs.size(0))
                 num_batches += 1
                 if (epoch_config.num_batches_in_epoch > 0 and

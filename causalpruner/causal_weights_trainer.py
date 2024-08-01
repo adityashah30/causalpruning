@@ -134,7 +134,7 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
                     loss = 0.5 * F.mse_loss(output, label, reduction='sum')
                     loss.backward()
                     self.optimizer.step()
-                    self.optimizer.zero_grad()
+                    self.optimizer.zero_grad(set_to_none=True)
                     sumloss += loss.item()
             if sumloss > (best_loss - self.loss_tol):
                 iter_no_change += 1
