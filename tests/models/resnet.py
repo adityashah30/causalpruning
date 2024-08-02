@@ -90,7 +90,7 @@ def initialize_model_weights(model: nn.Module) -> nn.Module:
 
 def get_resnet18(dataset: str) -> nn.Module:
     dataset = dataset.lower()
-    if dataset == 'cifar10':
+    if dataset in ['cifar10', 'fashionmnist']:
         model = ResNet18(n_classes=10, kernel=3, stride=1, padding=1)
         model = initialize_model_weights(model)
         return model
