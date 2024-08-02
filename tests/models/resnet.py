@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torchvision.models import (
     resnet50,
     ResNet50_Weights,
@@ -7,74 +8,69 @@ from torchvision.models import (
 
 
 class BasicBlock(nn.Module):
-    def __init__(self,
-                 in_channels: int,
-                 out_channels: int,
-                 stride: int = 1,
-                 downsample: bool = False):
-        super().__init__()
+    expansion = 1
+
+    def __init__(self, in_planes, planes, stride=1):
+        super(BasicBlock, self).__init__()
         self.conv1 = nn.Conv2d(
-            in_channels, out_channels, kernel_size=3, stride=stride, padding=1,
+            in_planes, planes, kernel_size=3, stride=stride, padding=1,
             bias=True)
-        self.relu = nn.ReLU(inplace=True)
-        self.conv2 = nn.Conv2d(
-            out_channels, out_channels, kernel_size=3, stride=1, padding=1,
-            bias=True)
-        self.downsample = None
-        if downsample:
-            self.downsample = nn.Conv2d(
-                in_channels, out_channels, kernel_size=1, stride=stride,
-                bias=True)
+        self.conv2 = nn.Conv2d(planes, planes, kernel_size=3,
+                               stride=1, padding=1, bias=True)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        identity = x.clone()
-        x = self.conv1(x)
-        x = self.relu(x)
-        x = self.conv2(x)
-        if self.downsample:
-            identity = self.downsample(identity)
-        x += identity
-        return self.relu(x)
+        self.shortcut = nn.Sequential()
+        if stride != 1 or in_planes != self.expansion * planes:
+            self.shortcut = nn.Conv2d(
+                in_planes, self.expansion * planes, kernel_size=1,
+                stride=stride, bias=True)
+
+    def forward(self, x):
+        out = self.conv1(x)
+        out = F.relu(out)
+        out = self.conv2(out)
+        out += self.shortcut(x)
+        out = F.relu(out)
+        return out
 
 
-class Resnet18(nn.Module):
-    def __init__(self, n_classes: int = 10) -> None:
+class ResNet(nn.Module):
+    def __init__(
+            self, block, num_blocks, num_classes, kernel: int, stride: int,
+            padding: int):
         super().__init__()
-        self.conv1 = nn.Conv2d(
-            3, 64, kernel_size=7, stride=2, padding=(3, 3),
-            bias=True)
-        self.relu = nn.ReLU(inplace=True)
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        self.layer1 = nn.Sequential(
-            BasicBlock(64, 64),
-            BasicBlock(64, 64),
-        )
-        self.layer2 = nn.Sequential(
-            BasicBlock(64, 128, stride=2, downsample=True),
-            BasicBlock(128, 128),
-        )
-        self.layer3 = nn.Sequential(
-            BasicBlock(128, 256, stride=2, downsample=True),
-            BasicBlock(256, 256),
-        )
-        self.layer4 = nn.Sequential(
-            BasicBlock(256, 512, stride=2, downsample=True),
-            BasicBlock(512, 512),
-        )
-        self.avgpool = nn.AdaptiveAvgPool2d(output_size=(1, 1))
-        self.fc = nn.Linear(in_features=512, out_features=n_classes)
+        self.in_planes = 64
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=kernel,
+                               stride=stride, padding=padding, bias=True)
+        self.layer1 = self._make_layer(block, 64, num_blocks[0], stride=1)
+        self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2)
+        self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2)
+        self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2)
+        self.linear = nn.Linear(512 * block.expansion, num_classes)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.conv1(x)
-        x = self.relu(x)
-        x = self.maxpool(x)
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
-        x = self.avgpool(x)  # [bs, 512, 1, 1]
-        x = torch.squeeze(x)  # reshape to [bs, 512]
-        return self.fc(x)
+    def _make_layer(self, block, planes, num_blocks, stride):
+        strides = [stride] + [1] * (num_blocks - 1)
+        layers = []
+        for stride in strides:
+            layers.append(block(self.in_planes, planes, stride))
+            self.in_planes = planes * block.expansion
+        return nn.Sequential(*layers)
+
+    def forward(self, x):
+        out = self.conv1(x)
+        out = F.relu(out)
+        out = self.layer1(out)
+        out = self.layer2(out)
+        out = self.layer3(out)
+        out = self.layer4(out)
+        out = F.avg_pool2d(out, 4)
+        out = out.view(out.size(0), -1)
+        out = self.linear(out)
+        return out
+
+
+def ResNet18(
+        n_classes: int, kernel: int, stride: int, padding: int) -> nn.Module:
+    return ResNet(BasicBlock, [2, 2, 2, 2], n_classes, kernel, stride, padding)
 
 
 def initialize_model_weights(model: nn.Module) -> nn.Module:
@@ -95,7 +91,7 @@ def initialize_model_weights(model: nn.Module) -> nn.Module:
 def get_resnet18(dataset: str) -> nn.Module:
     dataset = dataset.lower()
     if dataset == 'cifar10':
-        model = Resnet18(n_classes=10)
+        model = ResNet18(n_classes=10, kernel=3, stride=1, padding=1)
         model = initialize_model_weights(model)
         return model
     raise NotImplementedError(f'Resnet18 is not available for {dataset}')
