@@ -22,7 +22,8 @@ def get_imagenet(
             v2.RandomResizedCrop(224),
             v2.RandomHorizontalFlip(),
         ] + default_transforms)
-        test_transforms = v2.Compose(default_transforms)
+        test_transforms = v2.Compose(
+            [v2.Resize((224, 224))] + default_transforms)
         train = ImageNet(root=imagenet_root, split='train',
                          transform=train_transforms)
         test = ImageNet(root=imagenet_root, split='val',
