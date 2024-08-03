@@ -86,6 +86,8 @@ def main(args):
     identifier = f'{model_name}_{dataset_name}_{prune_identifier}'
     checkpoint_dir = os.path.join(args.checkpoint_dir, identifier)
     tensorboard_dir = os.path.join(args.tensorboard_dir, identifier)
+    if args.train_only:
+        args.start_clean = False
     if args.start_clean:
         delete_dir_if_exists(checkpoint_dir)
         delete_dir_if_exists(tensorboard_dir)
@@ -115,6 +117,7 @@ def main(args):
         data_config=data_config, epoch_config=epoch_config,
         tensorboard_dir=tensorboard_dir,checkpoint_dir=checkpoint_dir,
         verbose=args.verbose,
+        train_only=args.train_only,
         device=best_device(device_id))
     pruner = None
     if args.prune:
@@ -178,6 +181,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--train_lr', type=float, default=3e-4,
         help='Learning rate for the train optimizer')
+    parser.add_argument('--train_only', 
+                        action=argparse.BooleanOptionalAction,
+                        default=False,
+                        help='Only trains the model if set to true. i.e. doesn\'t do pre-pruning or pruning')
     # Dataset args
     parser.add_argument('--dataset', type=str,
                         choices=['cifar10', 'fashionmnist', 'imagenet'],

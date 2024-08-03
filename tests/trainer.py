@@ -55,7 +55,8 @@ class TrainerConfig:
     tensorboard_dir: str
     checkpoint_dir: str
     loss_fn: Callable = F.cross_entropy
-    verbose: bool = False
+    verbose: bool = True
+    train_only: bool = False
     device: Union[str, torch.device] = best_device()
 
 
@@ -96,6 +97,8 @@ class Trainer:
     def __init__(self, config: TrainerConfig, pruner: Optional[Pruner] = None):
         self.config = config
         self.pruner = pruner
+        if config.train_only:
+            self.pruner = None
         # Shortcuts for easy access
         self.data_config = config.data_config
         self.epoch_config = config.epoch_config
