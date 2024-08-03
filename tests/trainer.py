@@ -100,10 +100,11 @@ class Trainer:
         # Shortcuts for easy access
         self.data_config = config.data_config
         self.epoch_config = config.epoch_config
-        self.total_epochs = (self.epoch_config.num_pre_prune_epochs
-                             + self.epoch_config.num_prune_iterations *
-                             self.epoch_config.num_prune_epochs
-                             + self.epoch_config.num_train_epochs)
+        self.total_epochs = self.epoch_config.num_train_epochs
+        if not config.train_only:
+            self.total_epochs += (self.epoch_config.num_pre_prune_epochs
+                                  + self.epoch_config.num_prune_iterations *
+                                  self.epoch_config.num_prune_epochs)
         self.device = config.device
         self.pbar = tqdm(total=self.total_epochs)
         self.global_step = -1
