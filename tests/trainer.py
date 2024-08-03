@@ -97,8 +97,6 @@ class Trainer:
     def __init__(self, config: TrainerConfig, pruner: Optional[Pruner] = None):
         self.config = config
         self.pruner = pruner
-        if config.train_only:
-            self.pruner = None
         # Shortcuts for easy access
         self.data_config = config.data_config
         self.epoch_config = config.epoch_config
@@ -131,13 +129,16 @@ class Trainer:
             num_workers=data_config.num_workers,
             persistent_workers=data_config.num_workers > 0)
 
+    def _should_prune(self) -> bool:
+        return not self.config.train_only and self.pruner is not None
+
     def run(self):
-        if self.pruner is not None:
+        if self._should_prune():
             tqdm.write(f'Pruning method: {self.pruner}')
             self._run_pre_prune()
             self._run_prune()
         self._run_training()
-        if self.pruner is not None:
+        if self._should_prune():
             self.pruner.apply_masks()
         self._checkpoint_model('trained')
         self.get_all_eval_metrics()
@@ -383,5 +384,7 @@ class Trainer:
         if not os.path.exists(fname):
             tqdm.write(f'Model not found at {fname}')
             return
+        if self.pruner is not None:
+            self.pruner.apply_identity_masks()
         tqdm.write(f'Model loaded from {fname}')
         self.config.model.load_state_dict(torch.load(fname))

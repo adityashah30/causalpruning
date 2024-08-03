@@ -104,6 +104,12 @@ class Pruner(ABC):
             prune.remove(module, 'weight')
 
     @torch.no_grad
+    def apply_identity_masks(self) -> None:
+        for param in self.params:
+            module = self.modules_dict[param]
+            prune.identity(module, 'weight')
+
+    @torch.no_grad
     def remove_masks(self) -> None:
         for _, module in self.modules_dict.items():
             setattr(module, 'weight', module.weight_orig)
