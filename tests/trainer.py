@@ -219,6 +219,7 @@ class Trainer:
         self.pruner.reset_weights()
 
     def _run_training(self):
+        self._load_model('prune')
         config = self.config
         epoch_config = self.epoch_config
         best_loss = np.inf
@@ -373,3 +374,11 @@ class Trainer:
     def _checkpoint_model(self, id: str):
         fname = os.path.join(self.config.checkpoint_dir, f'model.{id}.ckpt')
         torch.save(self.config.model.state_dict(), fname)
+
+    def _load_model(self, id: str):
+        fname = os.path.join(self.config.checkpoint_dir, f'model.{id}.ckpt')
+        if not os.path.exists(fname):
+            tqdm.write(f'Model not found at {fname}')
+            return
+        tqdm.write(f'Model loaded from {fname}')
+        self.config.model.load_state_dict(torch.load(fname))
