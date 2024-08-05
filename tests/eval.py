@@ -9,6 +9,7 @@ sys.path.insert(
 
 import argparse
 import os
+from tqdm.auto import tqdm
 
 import torch
 import torch.nn as nn
@@ -37,7 +38,7 @@ def eval_model(model: nn.Module,
                device: torch.device) -> float:
     model.eval()
     accuracy = MulticlassAccuracy().to(device)
-    for data in testloader:
+    for data in tqdm(testloader):
         inputs, labels = data
         inputs = inputs.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True)
@@ -49,7 +50,7 @@ def eval_model(model: nn.Module,
 
 @torch.no_grad
 def print_prune_stats(model: nn.Module):
-    print('======================================================')
+    tqdm.write('\n======================================================\n')
     all_params_total = 0
     all_params_pruned = 0
     for (name, param) in model.named_buffers():
@@ -60,16 +61,17 @@ def print_prune_stats(model: nn.Module):
         pruned = total - non_zero
         all_params_pruned += pruned
         percent = 100 * pruned / total
-        print(f'Name: {name}; Total: {total}; '
-              f'non-zero: {non_zero}; pruned: {pruned}; '
-              f'percent: {percent:.2f}%')
+        tqdm.write(f'Name: {name}; Total: {total}; '
+                  f'non-zero: {non_zero}; pruned: {pruned}; '
+                  f'percent: {percent:.2f}%')
     all_params_non_zero = all_params_total - all_params_pruned
     all_params_percent = 100 * all_params_pruned / \
         (all_params_total + 1e-6)
-    print(f'Name: All; Total: {all_params_total}; '
-         f'non-zero: {all_params_non_zero}; '
-         f'pruned: {all_params_pruned}; '
-         f'percent: {all_params_percent:.2f}%')
+    tqdm.write(f'Name: All; Total: {all_params_total}; '
+               f'non-zero: {all_params_non_zero}; '
+               f'pruned: {all_params_pruned}; '
+               f'percent: {all_params_percent:.2f}%')
+    tqdm.write('\n======================================================\n')
 
 
 def main(args: argparse.Namespace):
@@ -94,10 +96,10 @@ def main(args: argparse.Namespace):
 
     accuracy = eval_model(model, testloader, device)
 
-    print(f'Model: {model_name}')
-    print(f'Dataset: {dataset_name}')
+    tqdm.write(f'Model: {model_name}')
+    tqdm.write(f'Dataset: {dataset_name}')
     print_prune_stats(model)
-    print(f'Accuracy: {accuracy}')
+    tqdm.write(f'Accuracy: {accuracy}')
 
 
 def parse_args() -> argparse.Namespace:
@@ -110,7 +112,7 @@ def parse_args() -> argparse.Namespace:
                         choices=['cifar10', 'fashionmnist', 'imagenet'],
                         help='Dataset name')
     parser.add_argument('--model_checkpoint', 
-                        type=str, 
+                        type=str, default='',
                         help='Path to model checkpoint. Loads the checkpoint if model is given -- else uses the default version')
     parser.add_argument(
         '--dataset_root_dir', type=str, default='../data',
@@ -119,6 +121,15 @@ def parse_args() -> argparse.Namespace:
                         type=int,
                         default=0,
                         help='The device id. Useful for multi device systems')
+    parser.add_argument(
+        '--num_workers', type=int, default=4,
+        help='Number of dataset workers')
+    parser.add_argument(
+        '--shuffle', action=argparse.BooleanOptionalAction,
+        default=True,
+        help='Whether to shuffle the test datasets')
+    parser.add_argument('--batch_size', type=int,
+                        default=256, help='Batch size')
 
     return parser.parse_args()
 
