@@ -57,6 +57,7 @@ class TrainerConfig:
     loss_fn: Callable = F.cross_entropy
     verbose: bool = True
     train_only: bool = False
+    model_to_load_for_training: str = 'prune.final'
     device: Union[str, torch.device] = best_device()
 
 
@@ -180,7 +181,8 @@ class Trainer:
         self.pruner.start_pruning()
         for iteration in range(epoch_config.num_prune_iterations):
             self._run_prune_iteration(iteration)
-        self._checkpoint_model('prune')
+            self._checkpoint_model(f'prune.{iteration}')
+        self._checkpoint_model('prune.final')
 
     def _run_prune_iteration(self, iteration):
         config = self.config
@@ -224,7 +226,7 @@ class Trainer:
         self.pruner.reset_weights()
 
     def _run_training(self):
-        self._load_model('prune')
+        self._load_model(self.config.model_to_load_for_training)
         config = self.config
         epoch_config = self.epoch_config
         best_loss = np.inf

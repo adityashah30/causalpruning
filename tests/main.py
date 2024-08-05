@@ -118,6 +118,7 @@ def main(args):
         tensorboard_dir=tensorboard_dir,checkpoint_dir=checkpoint_dir,
         verbose=args.verbose,
         train_only=args.train_only,
+        model_to_load_for_training=args.model_to_load_for_training,
         device=best_device(device_id))
     pruner = None
     if args.prune:
@@ -185,6 +186,9 @@ def parse_args() -> argparse.Namespace:
                         action=argparse.BooleanOptionalAction,
                         default=False,
                         help='Only trains the model if set to true. i.e. doesn\'t do pre-pruning or pruning')
+    parser.add_argument(
+        '--model_to_load_for_training', type=str, default='prune.final',
+        help='Model id to load for training. The loaded path is "model.{model_to_load_for_training}.ckpt')
     # Dataset args
     parser.add_argument('--dataset', type=str,
                         choices=['cifar10', 'fashionmnist', 'imagenet'],
