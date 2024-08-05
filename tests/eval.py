@@ -85,6 +85,7 @@ def main(args: argparse.Namespace):
     model = get_model(model_name, dataset_name)
     if model_checkpoint != '':
         load_model(model, model_checkpoint)
+    model = model.to(device)
 
     _, test_dataset, _ = get_dataset(
         dataset_name, model_name, root_dir=dataset_root_dir)
