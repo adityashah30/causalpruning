@@ -53,6 +53,14 @@ class Pruner(ABC):
                 children[root_name] = module
         return children
 
+    @staticmethod
+    def apply_identity_masks_to_model(model: nn.Module) -> None:
+        children = Pruner.get_children(model, 'model')
+        for module in children.values():
+            if not Pruner.is_module_supported(module):
+                continue
+            prune.identity(module, 'weight')
+
     def __init__(self, config: PrunerConfig):
         super().__init__()
         self.config = config
