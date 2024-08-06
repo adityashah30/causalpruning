@@ -13,6 +13,8 @@ from tqdm.auto import tqdm
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
 from torch.utils.data import DataLoader
 from torcheval.metrics import MulticlassAccuracy
 
@@ -31,6 +33,29 @@ def load_model(model: nn.Module, path: str):
     Pruner.apply_identity_masks_to_model(model)
     print(f'Model loaded from {path}')
     model.load_state_dict(torch.load(path))
+
+
+def train_model(model: nn.Module, 
+                trainloader: DataLoader, 
+                lr: float,
+                num_batches: int,
+                device: torch.device):
+    tqdm.write('Training model')
+    batch_counter = 0
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    for data in tqdm(trainloader):
+        inputs, labels = data
+        inputs = inputs.to(device, non_blocking=True)
+        labels = labels.to(device, non_blocking=True)
+        outputs = model(inputs)
+        loss = F.cross_entropy(outputs, labels)
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
+        batch_counter += 1
+        if num_batches > 0 and batch_counter >= num_batches:
+            break
+
 
 @torch.no_grad
 def eval_model(model: nn.Module, 
@@ -87,13 +112,21 @@ def main(args: argparse.Namespace):
         load_model(model, model_checkpoint)
     model = model.to(device)
 
-    _, test_dataset, _ = get_dataset(
+    train_dataset, test_dataset, _ = get_dataset(
         dataset_name, model_name, root_dir=dataset_root_dir)
     testloader = DataLoader(
         test_dataset, batch_size=args.batch_size,
         shuffle=args.shuffle, pin_memory=True,
         num_workers=args.num_workers,
         persistent_workers=args.num_workers > 0)
+
+    if args.train:
+        trainloader = DataLoader(train_dataset, batch_size=args.batch_size,
+                                 shuffle=args.shuffle, pin_memory=True, num_workers=args.num_workers,
+                                 persistent_workers=args.num_workers > 0)
+        train_model(model, trainloader, args.lr, args.num_train_batches, device)
+        if args.trained_model_checkpoint != '':
+            torch.save(model.state_dict(), args.trained_model_checkpoint)
 
     accuracy = eval_model(model, testloader, device)
 
@@ -131,6 +164,18 @@ def parse_args() -> argparse.Namespace:
         help='Whether to shuffle the test datasets')
     parser.add_argument('--batch_size', type=int,
                         default=256, help='Batch size')
+    parser.add_argument(
+        '--train', action=argparse.BooleanOptionalAction,
+        default=False,
+        help='Whether to train the model before evaling')
+    parser.add_argument('--trained_model_checkpoint', 
+                        type=str, default='',
+                        help='Path to write trained model checkpoint. Used if not empty')
+    parser.add_argument('--num_train_batches', 
+                        type=int, default=-1, 
+                        help='Controls the number of train batches. Set to a positive value to limit training to a subset of the dataset')
+    parser.add_argument('--lr', type=float, default=3e-4, 
+                        help='Training optimizer learning rate')
 
     return parser.parse_args()
 
