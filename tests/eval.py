@@ -37,6 +37,7 @@ def load_model(model: nn.Module, path: str):
 
 def train_model(model: nn.Module, 
                 trainloader: DataLoader, 
+                testloader: DataLoader,
                 lr: float,
                 num_epochs: int,
                 num_batches: int,
@@ -47,7 +48,7 @@ def train_model(model: nn.Module,
     if num_batches < 0:
         num_batches = len(trainloader)
     epoch_pbar = tqdm(total=num_epochs)
-    for _ in range(num_epochs):
+    for epoch in range(num_epochs):
         epoch_pbar.update(1)
         batch_pbar = tqdm(total=num_batches)
         for idx, data in enumerate(trainloader):
@@ -62,6 +63,8 @@ def train_model(model: nn.Module,
             optimizer.zero_grad(set_to_none=True)
             if idx >= num_batches:
                 break
+        accuracy = eval_model(model, testloader, device)
+        tqdm.write(f'Epoch: {epoch}; Accuracy: {accuracy}')
 
 
 @torch.no_grad
@@ -139,6 +142,7 @@ def main(args: argparse.Namespace):
                                  persistent_workers=args.num_workers > 0)
         train_model(model, 
                     trainloader, 
+                    testloader,
                     args.lr, 
                     args.num_train_epochs, 
                     args.num_train_batches, 
