@@ -181,7 +181,7 @@ def parse_args() -> argparse.Namespace:
         '--train_optimizer', type=str, default='adam',
         help='Training Optimizer', choices=['adam', 'sgd'])
     parser.add_argument(
-        '--train_lr', type=float, default=3e-4,
+        '--train_lr', type=float, default=5e-4,
         help='Learning rate for the train optimizer')
     parser.add_argument('--train_only',
                         action=argparse.BooleanOptionalAction,

@@ -131,7 +131,7 @@ class Trainer:
             persistent_workers=data_config.num_workers > 0)
         self.testloader = DataLoader(
             data_config.test_dataset, batch_size=data_config.batch_size,
-            shuffle=data_config.shuffle, pin_memory=True,
+            shuffle=False, pin_memory=True,
             num_workers=data_config.num_workers,
             persistent_workers=data_config.num_workers > 0)
 
