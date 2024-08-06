@@ -35,8 +35,8 @@ def load_model(model: nn.Module, path: str):
     model.load_state_dict(torch.load(path))
 
 
-def train_model(model: nn.Module, 
-                trainloader: DataLoader, 
+def train_model(model: nn.Module,
+                trainloader: DataLoader,
                 testloader: DataLoader,
                 lr: float,
                 num_epochs: int,
@@ -47,10 +47,10 @@ def train_model(model: nn.Module,
     optimizer = optim.Adam(model.parameters(), lr=lr)
     if num_batches < 0:
         num_batches = len(trainloader)
-    epoch_pbar = tqdm(total=num_epochs)
+    epoch_pbar = tqdm(total=num_epochs, leave=False)
     for epoch in range(num_epochs):
         epoch_pbar.update(1)
-        batch_pbar = tqdm(total=num_batches)
+        batch_pbar = tqdm(total=num_batches, leave=False)
         for idx, data in enumerate(trainloader):
             batch_pbar.update(1)
             inputs, labels = data
@@ -68,8 +68,8 @@ def train_model(model: nn.Module,
 
 
 @torch.no_grad
-def eval_model(model: nn.Module, 
-               testloader: DataLoader, 
+def eval_model(model: nn.Module,
+               testloader: DataLoader,
                device: torch.device) -> float:
     model.eval()
     accuracy = MulticlassAccuracy().to(device)
@@ -123,8 +123,8 @@ def main(args: argparse.Namespace):
     model = model.to(device)
     # Handle BatchNormLayers
     for module in model.parameters():
-        if (isinstance(module, nn.BatchNorm1d) or 
-            isinstance(module, nn.BatchNorm2d) or 
+        if (isinstance(module, nn.BatchNorm1d) or
+            isinstance(module, nn.BatchNorm2d) or
             isinstance(module, nn.BatchNorm3d)):
             module.reset_parameters()
 
@@ -140,12 +140,12 @@ def main(args: argparse.Namespace):
         trainloader = DataLoader(train_dataset, batch_size=args.batch_size,
                                  shuffle=args.shuffle, pin_memory=True, num_workers=args.num_workers,
                                  persistent_workers=args.num_workers > 0)
-        train_model(model, 
-                    trainloader, 
+        train_model(model,
+                    trainloader,
                     testloader,
-                    args.lr, 
-                    args.num_train_epochs, 
-                    args.num_train_batches, 
+                    args.lr,
+                    args.num_train_epochs,
+                    args.num_train_batches,
                     device)
         if args.trained_model_checkpoint != '':
             torch.save(model.state_dict(), args.trained_model_checkpoint)
@@ -167,7 +167,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--dataset', type=str,
                         choices=['cifar10', 'fashionmnist', 'imagenet'],
                         help='Dataset name')
-    parser.add_argument('--model_checkpoint', 
+    parser.add_argument('--model_checkpoint',
                         type=str, default='',
                         help='Path to model checkpoint. Loads the checkpoint if model is given -- else uses the default version')
     parser.add_argument(
@@ -190,15 +190,15 @@ def parse_args() -> argparse.Namespace:
         '--train', action=argparse.BooleanOptionalAction,
         default=False,
         help='Whether to train the model before evaling')
-    parser.add_argument('--trained_model_checkpoint', 
+    parser.add_argument('--trained_model_checkpoint',
                         type=str, default='',
                         help='Path to write trained model checkpoint. Used if not empty')
-    parser.add_argument('--num_train_batches', 
-                        type=int, default=-1, 
+    parser.add_argument('--num_train_batches',
+                        type=int, default=-1,
                         help='Controls the number of train batches. Set to a positive value to limit training to a subset of the dataset')
-    parser.add_argument('--num_train_epochs', type=int, default=1, 
+    parser.add_argument('--num_train_epochs', type=int, default=1,
                         help='Number of training epochs')
-    parser.add_argument('--lr', type=float, default=3e-4, 
+    parser.add_argument('--lr', type=float, default=3e-4,
                         help='Training optimizer learning rate')
 
     return parser.parse_args()
