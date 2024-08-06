@@ -168,7 +168,7 @@ class Trainer:
                 config.prune_optimizer.step()
                 config.prune_optimizer.zero_grad(set_to_none=True)
                 loss_avg.update(loss.item(), inputs.size(0))
-                if batch_counter % epoch_config.tqdm_update_frequency:
+                if batch_counter % epoch_config.tqdm_update_frequency == 0:
                     pbar.update(epoch_config.tqdm_update_frequency)
                 if (epoch_config.num_batches_in_epoch > 0 and
                         batch_counter >= epoch_config.num_batches_in_epoch):
@@ -210,7 +210,7 @@ class Trainer:
                 config.prune_optimizer.step()
                 config.prune_optimizer.zero_grad(set_to_none=True)
                 loss_avg.update(loss.item(), inputs.size(0))
-                if batch_counter % epoch_config.tqdm_update_frequency:
+                if batch_counter % epoch_config.tqdm_update_frequency == 0:
                     pbar.update(epoch_config.tqdm_update_frequency)
                 if (epoch_config.num_batches_in_epoch > 0 and
                         batch_counter >= epoch_config.num_batches_in_epoch):
@@ -253,7 +253,7 @@ class Trainer:
                 config.train_optimizer.step()
                 config.train_optimizer.zero_grad(set_to_none=True)
                 loss_avg.update(loss.item(), inputs.size(0))
-                if batch_counter % epoch_config.tqdm_update_frequency:
+                if batch_counter % epoch_config.tqdm_update_frequency == 0:
                     pbar.update(epoch_config.tqdm_update_frequency)
                 if (epoch_config.num_batches_in_epoch > 0 and
                         batch_counter >= epoch_config.num_batches_in_epoch):
