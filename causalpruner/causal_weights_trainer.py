@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from tqdm.auto import tqdm
+from tqdm.auto import tqdm, trange
 
 from causalpruner.lasso_optimizer import LassoSGD
 
@@ -120,9 +120,9 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
         self.layer.train()
         best_loss = np.inf
         iter_no_change = 0
-        pbar_prune = tqdm(dataloader, leave=False)
-        for iter in range(self.max_iter):
+        for iter in trange(self.max_iter, leave=False):
             sumloss = 0.0
+            pbar_prune = tqdm(dataloader, leave=False)
             for idx, (X, Y) in enumerate(pbar_prune):
                 pbar_prune.set_description(f'Pruning {self.param_name}/{idx}')
                 X = X.to(device=self.device, non_blocking=True)
