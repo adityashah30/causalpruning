@@ -38,24 +38,30 @@ def load_model(model: nn.Module, path: str):
 def train_model(model: nn.Module, 
                 trainloader: DataLoader, 
                 lr: float,
+                num_epochs: int,
                 num_batches: int,
                 device: torch.device):
     tqdm.write('Training model')
     model.train()
-    batch_counter = 0
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    for data in tqdm(trainloader):
-        inputs, labels = data
-        inputs = inputs.to(device, non_blocking=True)
-        labels = labels.to(device, non_blocking=True)
-        outputs = model(inputs)
-        loss = F.cross_entropy(outputs, labels)
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad(set_to_none=True)
-        batch_counter += 1
-        if num_batches > 0 and batch_counter >= num_batches:
-            break
+    if num_batches < 0:
+        num_batches = len(trainloader)
+    epoch_pbar = tqdm(total=num_epochs)
+    for _ in range(num_epochs):
+        epoch_pbar.update(1)
+        batch_pbar = tqdm(total=num_batches)
+        for idx, data in enumerate(trainloader):
+            batch_pbar.update(1)
+            inputs, labels = data
+            inputs = inputs.to(device, non_blocking=True)
+            labels = labels.to(device, non_blocking=True)
+            outputs = model(inputs)
+            loss = F.cross_entropy(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+            if idx >= num_batches:
+                break
 
 
 @torch.no_grad
@@ -117,7 +123,7 @@ def main(args: argparse.Namespace):
         if (isinstance(module, nn.BatchNorm1d) or 
             isinstance(module, nn.BatchNorm2d) or 
             isinstance(module, nn.BatchNorm3d)):
-            module.reset_running_stats()
+            module.reset_parameters()
 
     train_dataset, test_dataset, _ = get_dataset(
         dataset_name, model_name, root_dir=dataset_root_dir)
@@ -131,7 +137,12 @@ def main(args: argparse.Namespace):
         trainloader = DataLoader(train_dataset, batch_size=args.batch_size,
                                  shuffle=args.shuffle, pin_memory=True, num_workers=args.num_workers,
                                  persistent_workers=args.num_workers > 0)
-        train_model(model, trainloader, args.lr, args.num_train_batches, device)
+        train_model(model, 
+                    trainloader, 
+                    args.lr, 
+                    args.num_train_epochs, 
+                    args.num_train_batches, 
+                    device)
         if args.trained_model_checkpoint != '':
             torch.save(model.state_dict(), args.trained_model_checkpoint)
 
@@ -181,6 +192,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--num_train_batches', 
                         type=int, default=-1, 
                         help='Controls the number of train batches. Set to a positive value to limit training to a subset of the dataset')
+    parser.add_argument('--num_train_epochs', type=int, default=1, 
+                        help='Number of training epochs')
     parser.add_argument('--lr', type=float, default=3e-4, 
                         help='Training optimizer learning rate')
 
