@@ -40,6 +40,10 @@ class EpochConfig:
     # dataset by default -- which will happen for any value < 0.
     # Use a positive value to limit iterating to a specific number of batches.
     num_batches_in_epoch: int = -1
+    # The frequency with which the tqdm progress bar is updated. Set to a
+    # larger value for a fast iteration -- else tqdm update will be the
+    # bottleneck.
+    tqdm_update_frequency: int = 1
 
 
 @dataclass
@@ -153,8 +157,8 @@ class Trainer:
             self.pbar.update(1)
             config.model.train()
             loss_avg = AverageMeter()
-            num_batches = 0
-            for data in self.trainloader:
+            pbar = tqdm(self.trainloader, leave=False)
+            for batch_counter, data in enumerate(pbar):
                 inputs, labels = data
                 inputs = inputs.to(self.device, non_blocking=True)
                 labels = labels.to(self.device, non_blocking=True)
@@ -164,9 +168,10 @@ class Trainer:
                 config.prune_optimizer.step()
                 config.prune_optimizer.zero_grad(set_to_none=True)
                 loss_avg.update(loss.item(), inputs.size(0))
-                num_batches += 1
+                if batch_counter % epoch_config.tqdm_update_frequency:
+                    pbar.update(epoch_config.tqdm_update_frequency)
                 if (epoch_config.num_batches_in_epoch > 0 and
-                        num_batches >= epoch_config.num_batches_in_epoch):
+                        batch_counter >= epoch_config.num_batches_in_epoch):
                     break
             self.writer.add_scalar(
                 'Loss/train', loss_avg.avg, self.global_step)
@@ -193,8 +198,8 @@ class Trainer:
             self.pbar.update(1)
             config.model.train()
             loss_avg = AverageMeter()
-            num_batches = 0
-            for data in self.trainloader:
+            pbar = tqdm(self.trainloader, leave=False)
+            for batch_counter, data in enumerate(pbar):
                 inputs, labels = data
                 inputs = inputs.to(self.device, non_blocking=True)
                 labels = labels.to(self.device, non_blocking=True)
@@ -205,9 +210,10 @@ class Trainer:
                 config.prune_optimizer.step()
                 config.prune_optimizer.zero_grad(set_to_none=True)
                 loss_avg.update(loss.item(), inputs.size(0))
-                num_batches += 1
+                if batch_counter % epoch_config.tqdm_update_frequency:
+                    pbar.update(epoch_config.tqdm_update_frequency)
                 if (epoch_config.num_batches_in_epoch > 0 and
-                        num_batches >= epoch_config.num_batches_in_epoch):
+                        batch_counter >= epoch_config.num_batches_in_epoch):
                     break
             self.writer.add_scalar(
                 'Loss/train', loss_avg.avg, self.global_step)
@@ -236,8 +242,8 @@ class Trainer:
             self.pbar.update(1)
             config.model.train()
             loss_avg = AverageMeter()
-            num_batches = 0
-            for data in self.trainloader:
+            pbar = tqdm(self.trainloader, leave=False)
+            for batch_counter, data in enumerate(pbar):
                 inputs, labels = data
                 inputs = inputs.to(self.device, non_blocking=True)
                 labels = labels.to(self.device, non_blocking=True)
@@ -247,9 +253,10 @@ class Trainer:
                 config.train_optimizer.step()
                 config.train_optimizer.zero_grad(set_to_none=True)
                 loss_avg.update(loss.item(), inputs.size(0))
-                num_batches += 1
+                if batch_counter % epoch_config.tqdm_update_frequency:
+                    pbar.update(epoch_config.tqdm_update_frequency)
                 if (epoch_config.num_batches_in_epoch > 0 and
-                        num_batches >= epoch_config.num_batches_in_epoch):
+                        batch_counter >= epoch_config.num_batches_in_epoch):
                     break
             loss = loss_avg.avg
             self.writer.add_scalar(
@@ -276,7 +283,7 @@ class Trainer:
         model = self.config.model
         model.eval()
         accuracy = MulticlassAccuracy().to(self.device)
-        for data in self.testloader:
+        for data in tqdm(self.testloader, leave=False):
             inputs, labels = data
             inputs = inputs.to(self.device, non_blocking=True)
             labels = labels.to(self.device, non_blocking=True)

@@ -108,7 +108,8 @@ def main(args):
         num_prune_iterations=args.num_prune_iterations if args.prune else 0,
         num_prune_epochs=args.num_prune_epochs if args.prune else 0,
         num_train_epochs=args.max_train_epochs,
-        num_batches_in_epoch=args.num_batches_in_epoch)
+        num_batches_in_epoch=args.num_batches_in_epoch,
+        tqdm_update_frequency=args.tqdm_update_frequency)
     trainer_config = TrainerConfig(
         hparams=vars(args), model=model, prune_optimizer=prune_optimizer,
         train_optimizer=train_optimizer,
@@ -182,7 +183,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--train_lr', type=float, default=3e-4,
         help='Learning rate for the train optimizer')
-    parser.add_argument('--train_only', 
+    parser.add_argument('--train_only',
                         action=argparse.BooleanOptionalAction,
                         default=False,
                         help='Only trains the model if set to true. i.e. doesn\'t do pre-pruning or pruning')
@@ -229,6 +230,8 @@ def parse_args() -> argparse.Namespace:
                         help='Number of epochs for pruning')
     parser.add_argument('--num_batches_in_epoch', type=int, default=-1,
                         help='Number of batches per epoch. Runs the entire epoch by default')
+    parser.add_argument('--tqdm_update_frequency', type=int, default=1,
+                        help='tqdm update frequency.')
     parser.add_argument('--optimizer', type=str,
                         default='sgd', help='Optimizer', choices=['sgd'])
     parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate')
