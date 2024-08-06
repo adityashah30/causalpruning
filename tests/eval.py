@@ -41,6 +41,7 @@ def train_model(model: nn.Module,
                 num_batches: int,
                 device: torch.device):
     tqdm.write('Training model')
+    model.train()
     batch_counter = 0
     optimizer = optim.Adam(model.parameters(), lr=lr)
     for data in tqdm(trainloader):
@@ -111,6 +112,12 @@ def main(args: argparse.Namespace):
     if model_checkpoint != '':
         load_model(model, model_checkpoint)
     model = model.to(device)
+    # Handle BatchNormLayers
+    for module in model.parameters():
+        if (isinstance(module, nn.BatchNorm1d) or 
+            isinstance(module, nn.BatchNorm2d) or 
+            isinstance(module, nn.BatchNorm3d)):
+            module.reset_running_stats()
 
     train_dataset, test_dataset, _ = get_dataset(
         dataset_name, model_name, root_dir=dataset_root_dir)
