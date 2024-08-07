@@ -175,7 +175,7 @@ class Trainer:
                 if batch_counter % grad_step_num_batches == 0:
                     config.prune_optimizer.step()
                     config.prune_optimizer.zero_grad(set_to_none=True)
-                loss_avg.update(loss.item(), inputs.size(0))
+                loss_avg.update(loss.item())
                 if (batch_counter + 1) % tqdm_update_frequency == 0:
                     pbar.update(tqdm_update_frequency)
                 if (num_batches_in_epoch > 0 and
@@ -220,8 +220,8 @@ class Trainer:
                 outputs = config.model(inputs)
                 loss = config.loss_fn(outputs, labels)
                 loss.backward()
-                grad_step_loss_avg.update(loss.item(), inputs.size(0))
-                loss_avg.update(loss.item(), inputs.size(0))
+                grad_step_loss_avg.update(loss.item())
+                loss_avg.update(loss.item())
                 if batch_counter % grad_step_num_batches == 0:
                     self.pruner.provide_loss(grad_step_loss_avg.avg)
                     config.prune_optimizer.step()
@@ -275,7 +275,7 @@ class Trainer:
                 if batch_counter % grad_step_num_batches == 0:
                     config.train_optimizer.step()
                     config.train_optimizer.zero_grad(set_to_none=True)
-                loss_avg.update(loss.item(), inputs.size(0))
+                loss_avg.update(loss.item())
                 if (batch_counter + 1) % tqdm_update_frequency == 0:
                     pbar.update(tqdm_update_frequency)
                 if (num_batches_in_epoch > 0 and
@@ -283,8 +283,7 @@ class Trainer:
                     break
                 pbar.close()
             loss = loss_avg.avg
-            self.writer.add_scalar(
-                'Loss/train', loss, self.global_step)
+            self.writer.add_scalar('Loss/train', loss, self.global_step)
             accuracy = self.eval_model()
             self.pbar.set_description(
                 f'Training: ' +
