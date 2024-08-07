@@ -143,7 +143,7 @@ class Pruner(ABC):
                 if isinstance(hook, prune.BasePruningMethod):
                     del module._forward_pre_hooks[k]
 
-    def provide_loss(self, loss: torch.Tensor) -> None:
+    def provide_loss(self, loss: torch.Tensor, steps: int = 1) -> None:
         pass
 
     @torch.no_grad

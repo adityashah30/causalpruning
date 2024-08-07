@@ -40,6 +40,9 @@ class EpochConfig:
     # dataset by default -- which will happen for any value < 0.
     # Use a positive value to limit iterating to a specific number of batches.
     num_batches_in_epoch: int = -1
+    # Take a grad every `grad_step_num_batches`. Setting a value > 1 will cause
+    # gradient accumulation.
+    grad_step_num_batches: int = 1
     # The frequency with which the tqdm progress bar is updated. Set to a
     # larger value for a fast iteration -- else tqdm update will be the
     # bottleneck.
@@ -152,6 +155,9 @@ class Trainer:
     def _run_pre_prune(self):
         config = self.config
         epoch_config = self.epoch_config
+        num_batches_in_epoch = epoch_config.num_batches_in_epoch
+        grad_step_num_batches = epoch_config.grad_step_num_batches
+        tqdm_update_frequency = epoch_config.tqdm_update_frequency
         for epoch in range(epoch_config.num_pre_prune_epochs):
             self.global_step += 1
             self.pbar.update(1)
@@ -165,14 +171,16 @@ class Trainer:
                 outputs = config.model(inputs)
                 loss = config.loss_fn(outputs, labels)
                 loss.backward()
-                config.prune_optimizer.step()
-                config.prune_optimizer.zero_grad(set_to_none=True)
+                if batch_counter % grad_step_num_batches == 0:
+                    config.prune_optimizer.step()
+                    config.prune_optimizer.zero_grad(set_to_none=True)
                 loss_avg.update(loss.item(), inputs.size(0))
-                if batch_counter % epoch_config.tqdm_update_frequency == 0:
-                    pbar.update(epoch_config.tqdm_update_frequency)
-                if (epoch_config.num_batches_in_epoch > 0 and
-                        batch_counter >= epoch_config.num_batches_in_epoch):
+                if (batch_counter + 1) % tqdm_update_frequency == 0:
+                    pbar.update(tqdm_update_frequency)
+                if (num_batches_in_epoch > 0 and
+                        batch_counter >= num_batches_in_epoch):
                     break
+            pbar.close()
             self.writer.add_scalar(
                 'Loss/train', loss_avg.avg, self.global_step)
             accuracy = self.eval_model()
@@ -192,6 +200,9 @@ class Trainer:
     def _run_prune_iteration(self, iteration):
         config = self.config
         epoch_config = self.epoch_config
+        num_batches_in_epoch = epoch_config.num_batches_in_epoch
+        grad_step_num_batches = epoch_config.grad_step_num_batches
+        tqdm_update_frequency = epoch_config.tqdm_update_frequency
         self.pruner.start_iteration()
         for epoch in range(epoch_config.num_prune_epochs):
             self.global_step += 1
@@ -205,16 +216,18 @@ class Trainer:
                 labels = labels.to(self.device, non_blocking=True)
                 outputs = config.model(inputs)
                 loss = config.loss_fn(outputs, labels)
-                self.pruner.provide_loss(loss)
                 loss.backward()
-                config.prune_optimizer.step()
-                config.prune_optimizer.zero_grad(set_to_none=True)
+                if batch_counter % grad_step_num_batches == 0:
+                    self.pruner.provide_loss(loss, grad_step_num_batches)
+                    config.prune_optimizer.step()
+                    config.prune_optimizer.zero_grad(set_to_none=True)
                 loss_avg.update(loss.item(), inputs.size(0))
-                if batch_counter % epoch_config.tqdm_update_frequency == 0:
-                    pbar.update(epoch_config.tqdm_update_frequency)
-                if (epoch_config.num_batches_in_epoch > 0 and
-                        batch_counter >= epoch_config.num_batches_in_epoch):
+                if (batch_counter + 1) % tqdm_update_frequency == 0:
+                    pbar.update(tqdm_update_frequency)
+                if (num_batches_in_epoch > 0 and
+                        batch_counter >= num_batches_in_epoch):
                     break
+            pbar.close()
             self.writer.add_scalar(
                 'Loss/train', loss_avg.avg, self.global_step)
             accuracy = np.nan
@@ -235,6 +248,9 @@ class Trainer:
         self._load_model(self.config.model_to_load_for_training)
         config = self.config
         epoch_config = self.epoch_config
+        num_batches_in_epoch = epoch_config.num_batches_in_epoch
+        grad_step_num_batches = epoch_config.grad_step_num_batches
+        tqdm_update_frequency = epoch_config.tqdm_update_frequency
         best_loss = np.inf
         iter_no_change = 0
         for epoch in range(epoch_config.num_train_epochs):
@@ -250,14 +266,16 @@ class Trainer:
                 outputs = config.model(inputs)
                 loss = config.loss_fn(outputs, labels)
                 loss.backward()
-                config.train_optimizer.step()
-                config.train_optimizer.zero_grad(set_to_none=True)
+                if batch_counter % grad_step_num_batches == 0:
+                    config.train_optimizer.step()
+                    config.train_optimizer.zero_grad(set_to_none=True)
                 loss_avg.update(loss.item(), inputs.size(0))
-                if batch_counter % epoch_config.tqdm_update_frequency == 0:
-                    pbar.update(epoch_config.tqdm_update_frequency)
-                if (epoch_config.num_batches_in_epoch > 0 and
-                        batch_counter >= epoch_config.num_batches_in_epoch):
+                if (batch_counter + 1) % tqdm_update_frequency == 0:
+                    pbar.update(tqdm_update_frequency)
+                if (num_batches_in_epoch > 0 and
+                        batch_counter >= num_batches_in_epoch):
                     break
+                pbar.close()
             loss = loss_avg.avg
             self.writer.add_scalar(
                 'Loss/train', loss, self.global_step)

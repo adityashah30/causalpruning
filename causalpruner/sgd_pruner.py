@@ -141,8 +141,8 @@ class SGDPruner(Pruner):
         self.checkpoint_futures = []
 
     @torch.no_grad
-    def provide_loss(self, loss: torch.Tensor) -> None:
-        loss = loss.detach().cpu()
+    def provide_loss(self, loss: torch.Tensor, steps: int = 1) -> None:
+        loss = (loss).detach().cpu() / steps
         self.write_tensor(loss, self._get_checkpoint_path('loss'))
         for param in self.params:
             module = self.modules_dict[param]
