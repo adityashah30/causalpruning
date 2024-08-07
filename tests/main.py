@@ -84,6 +84,9 @@ def main(args):
         prune_identifier += f'_{args.mag_pruner_amount}'
     momentum=args.momentum
     identifier = f'{model_name}_{dataset_name}_{prune_identifier}'
+    suffix = args.suffix
+    if suffix != '':
+        identifier = f'{identifier}_{suffix}'
     checkpoint_dir = os.path.join(args.checkpoint_dir, identifier)
     tensorboard_dir = os.path.join(args.tensorboard_dir, identifier)
     if args.train_only:
@@ -166,6 +169,9 @@ def parse_args() -> argparse.Namespace:
                         type=int,
                         default=0,
                         help='The device id. Useful for multi device systems')
+    parser.add_argument('--suffix',
+                        type=str, default='',
+                        help='Suffix to be used for identifier. Not used if empty -- else adds `_{suffix}` to the identifier.')
     # Model args
     parser.add_argument('--model', type=str,
                         choices=['alexnet', 'lenet', 'resnet18', 'resnet50'],
