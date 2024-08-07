@@ -267,10 +267,10 @@ def parse_args() -> argparse.Namespace:
         '--causal_pruner_loss_tol', type=float, default=1e-4,
         help='Loss tolerance between current loss and best loss for early stopping')
     parser.add_argument(
-        '--causal_pruner_num_iter_no_change', type=int, default=5,
+        '--causal_pruner_num_iter_no_change', type=int, default=3,
         help='Number of iterations with no loss improvement before declaring convergence')
     parser.add_argument(
-        '--causal_pruner_batch_size', type=int, default=-1,
+        '--causal_pruner_batch_size', type=int, default=64,
         help='Batch size for causal pruner training. Use -1 to use the entire dataset')
     parser.add_argument(
         '--causal_pruner_preload', action=argparse.BooleanOptionalAction,

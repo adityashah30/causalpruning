@@ -74,9 +74,9 @@ class AverageMeter:
         self.reset()
 
     def reset(self):
-        self.val = 0
-        self.avg = 0
-        self.sum = 0
+        self.val = 0.0
+        self.avg = 0.0
+        self.sum = 0.0
         self.count = 0
 
     def update(self, val, n=1):
@@ -163,7 +163,8 @@ class Trainer:
             self.pbar.update(1)
             config.model.train()
             loss_avg = AverageMeter()
-            pbar = tqdm(self.trainloader, leave=False)
+            pbar = tqdm(
+                self.trainloader, leave=False, desc=f'Pre-prune epoch: {epoch}')
             for batch_counter, data in enumerate(pbar):
                 inputs, labels = data
                 inputs = inputs.to(self.device, non_blocking=True)
@@ -209,7 +210,9 @@ class Trainer:
             self.pbar.update(1)
             config.model.train()
             loss_avg = AverageMeter()
-            pbar = tqdm(self.trainloader, leave=False)
+            grad_step_loss_avg = AverageMeter()
+            pbar = tqdm(
+                self.trainloader, leave=False, desc=f'Prune epoch: {epoch}')
             for batch_counter, data in enumerate(pbar):
                 inputs, labels = data
                 inputs = inputs.to(self.device, non_blocking=True)
@@ -217,11 +220,13 @@ class Trainer:
                 outputs = config.model(inputs)
                 loss = config.loss_fn(outputs, labels)
                 loss.backward()
+                grad_step_loss_avg.update(loss.item(), inputs.size(0))
+                loss_avg.update(loss.item(), inputs.size(0))
                 if batch_counter % grad_step_num_batches == 0:
-                    self.pruner.provide_loss(loss, grad_step_num_batches)
+                    self.pruner.provide_loss(grad_step_loss_avg.avg)
                     config.prune_optimizer.step()
                     config.prune_optimizer.zero_grad(set_to_none=True)
-                loss_avg.update(loss.item(), inputs.size(0))
+                    grad_step_loss_avg.reset()
                 if (batch_counter + 1) % tqdm_update_frequency == 0:
                     pbar.update(tqdm_update_frequency)
                 if (num_batches_in_epoch > 0 and
@@ -258,7 +263,8 @@ class Trainer:
             self.pbar.update(1)
             config.model.train()
             loss_avg = AverageMeter()
-            pbar = tqdm(self.trainloader, leave=False)
+            pbar = tqdm(
+                self.trainloader, leave=False, desc=f'Train epoch: {epoch}')
             for batch_counter, data in enumerate(pbar):
                 inputs, labels = data
                 inputs = inputs.to(self.device, non_blocking=True)
@@ -301,7 +307,7 @@ class Trainer:
         model = self.config.model
         model.eval()
         accuracy = MulticlassAccuracy().to(self.device)
-        for data in tqdm(self.testloader, leave=False):
+        for data in tqdm(self.testloader, leave=False, desc='Eval'):
             inputs, labels = data
             inputs = inputs.to(self.device, non_blocking=True)
             labels = labels.to(self.device, non_blocking=True)

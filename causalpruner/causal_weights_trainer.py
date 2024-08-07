@@ -120,7 +120,8 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
         self.layer.train()
         best_loss = np.inf
         iter_no_change = 0
-        for iter in trange(self.max_iter, leave=False):
+        for iter in trange(
+                self.max_iter, leave=False, desc=f'Prune weight fitting'):
             sumloss = 0.0
             pbar_prune = tqdm(dataloader, leave=False)
             for idx, (X, Y) in enumerate(pbar_prune):
