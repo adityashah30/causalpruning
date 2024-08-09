@@ -124,6 +124,7 @@ def main(args):
         verbose=args.verbose,
         train_only=args.train_only,
         model_to_load_for_training=args.model_to_load_for_training,
+        model_to_save_after_training=args.model_to_save_after_training,
         device=best_device(device_id))
     pruner = None
     if args.prune:
@@ -141,12 +142,13 @@ def main(args):
                 pruner='SGDPruner',
                 checkpoint_dir=checkpoint_dir,
                 start_clean=args.start_clean,
+                eval_after_epoch=args.eval_after_epoch,
+                reset_weights=args.reset_weights_after_pruning,
                 batch_size=args.causal_pruner_batch_size,
                 multiprocess_checkpoint_writer=args.causal_pruner_multiprocessing_checkpoint_writer,
                 preload=args.causal_pruner_preload,
                 trainer_config=causal_weights_trainer_config,
                 delete_checkpoint_dir_after_training=args.delete_checkpoint_dir_after_training,
-                eval_after_epoch=args.eval_after_epoch,
                 device=best_device(device_id))
         elif args.pruner == 'magpruner':
             pruner_config = MagPrunerConfig(
@@ -155,6 +157,7 @@ def main(args):
                 checkpoint_dir=checkpoint_dir,
                 start_clean=args.start_clean,
                 eval_after_epoch = args.eval_after_epoch,
+                reset_weights=args.reset_weights_after_pruning,
                 prune_amount=args.mag_pruner_amount,
                 device=best_device(device_id))
         pruner = get_pruner(pruner_config)
@@ -197,6 +200,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--model_to_load_for_training', type=str, default='prune.final',
         help='Model id to load for training. The loaded path is "model.{model_to_load_for_training}.ckpt')
+    parser.add_argument(
+        '--model_to_save_after_training', type=str, default='trained',
+        help='Model id to save post training. The saved model path is "model.{model_to_save_after_training}.ckpt')
     # Dataset args
     parser.add_argument('--dataset', type=str,
                         choices=['cifar10', 'fashionmnist', 'imagenet'],
@@ -252,9 +258,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--pruner', type=str, default='causalpruner',
         help='Method for pruning', choices=['causalpruner', 'magpruner'])
+    parser.add_argument('--reset_weights_after_pruning',
+                        action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help='Reset weights to an earlier checkpoint after prune step if true.')
     parser.add_argument('--causal_pruner_multiprocessing_checkpoint_writer',
                          action=argparse.BooleanOptionalAction,
-                         default=False,
+                         default=True,
                          help='Controls if weights are written using a ProcessPoolExecutor')
     parser.add_argument(
         '--start_clean', action=argparse.BooleanOptionalAction,
@@ -273,7 +283,7 @@ def parse_args() -> argparse.Namespace:
         '--causal_pruner_loss_tol', type=float, default=1e-4,
         help='Loss tolerance between current loss and best loss for early stopping')
     parser.add_argument(
-        '--causal_pruner_num_iter_no_change', type=int, default=3,
+        '--causal_pruner_num_iter_no_change', type=int, default=2,
         help='Number of iterations with no loss improvement before declaring convergence')
     parser.add_argument(
         '--causal_pruner_batch_size', type=int, default=64,

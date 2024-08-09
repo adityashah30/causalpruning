@@ -65,6 +65,7 @@ class TrainerConfig:
     verbose: bool = True
     train_only: bool = False
     model_to_load_for_training: str = 'prune.final'
+    model_to_save_after_training: str = 'trained'
     device: Union[str, torch.device] = best_device()
 
 
@@ -149,7 +150,7 @@ class Trainer:
         self._run_training()
         if self._should_prune():
             self.pruner.apply_masks()
-        self._checkpoint_model('trained')
+        self._checkpoint_model(self.config.model_to_save_after_training)
         self.get_all_eval_metrics()
 
     def _run_pre_prune(self):
@@ -281,7 +282,7 @@ class Trainer:
                 if (num_batches_in_epoch > 0 and
                         batch_counter >= num_batches_in_epoch):
                     break
-                pbar.close()
+            pbar.close()
             loss = loss_avg.avg
             self.writer.add_scalar('Loss/train', loss, self.global_step)
             accuracy = self.eval_model()
@@ -382,9 +383,11 @@ class Trainer:
         all_params_total = 0
         all_params_pruned = 0
         for (name, param) in self.config.model.named_buffers():
+            if '.weight_mask' not in name:
+                continue
             name = name.rstrip('.weight_mask')
             non_zero = torch.count_nonzero(param)
-            total = torch.count_nonzero(torch.ones_like(param))
+            total = param.numel()
             all_params_total += total
             pruned = total - non_zero
             all_params_pruned += pruned

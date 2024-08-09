@@ -23,6 +23,7 @@ class PrunerConfig:
     checkpoint_dir: str
     start_clean: bool
     eval_after_epoch: bool
+    reset_weights: bool
     device: Union[str, torch.device]
 
 
@@ -56,20 +57,8 @@ class Pruner(ABC):
         return False
 
     @staticmethod
-    def get_children(model: nn.Module, root: str) -> dict[str, nn.Module]:
-        children = dict()
-        for name, module in model.named_children():
-            root_name = root + '_' + name
-            if not Pruner.is_module_supported(module):
-                children.update(Pruner.get_children(module, root_name))
-            else:
-                children[root_name] = module
-        return children
-
-    @staticmethod
     def apply_identity_masks_to_model(model: nn.Module) -> None:
-        children = Pruner.get_children(model, 'model')
-        for module in children.values():
+        for module in model.modules():
             if not Pruner.is_module_supported(module):
                 continue
             prune.identity(module, 'weight')
@@ -82,14 +71,13 @@ class Pruner(ABC):
 
         self.modules_dict = nn.ModuleDict()
         self.reset_modules_dict = nn.ModuleDict()
-        children = self.get_children(self.config.model, 'model')
-        for name, module in children.items():
+        for name, module in self.config.model.named_modules():
             if self.is_module_supported(module):
                 self.modules_dict[name] = module
-            elif self.is_module_to_be_reset(module):
+            if self.is_module_to_be_reset(module):
                 self.reset_modules_dict[name] = module
 
-        self.params = nn.ParameterList()
+        self.params = []
         for module_name, module in self.modules_dict.items():
             if hasattr(module, 'weight'):
                 self.params.append(module_name)
@@ -164,7 +152,9 @@ class Pruner(ABC):
 
     @torch.no_grad
     def reset_weights(self) -> None:
-        self.config.model.zero_grad()
+        self.config.model.zero_grad(set_to_none=True)
+        if not self.config.reset_weights:
+            return
         masks = dict()
         for name, module in self.modules_dict.items():
             if hasattr(module, 'weight_mask'):

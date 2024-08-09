@@ -6,64 +6,38 @@ mkdir -p ../tensorboard
 
 ## LeNet
 python main.py --model=lenet --dataset=fashionmnist --no-prune
+
 python main.py --model=lenet --dataset=fashionmnist --prune \
-    --pruner=causalpruner
-python main.py --model=lenet --dataset=fashionmnist --prune --pruner=magpruner
+    --pruner=causalpruner --causal_pruner_l1_regularization_coeff=1e-14
+
+python main.py --model=lenet --dataset=fashionmnist --prune \
+    --pruner=magpruner --mag_prune_amount=0.1
 
 ## AlexNet
 python main.py --model=alexnet --dataset=fashionmnist --no-prune
-python main.py --model=alexnet --dataset=fashionmnist --prune \
-    --pruner=causalpruner --causal_pruner_batch_size=16
-python main.py --model=alexnet --dataset=fashionmnist --prune \
-     --pruner=magpruner
 
-## ResNet
-python main.py --model=resnet --dataset=fashionmnist --no-prune
-python main.py --model=resnet --dataset=fashionmnist --prune \
-    --pruner=causalpruner --causal_pruner_batch_size=16
-python main.py --model=resnet --dataset=fashionmnist --prune \
-     --pruner=magpruner
+python main.py --model=alexnet --dataset=fashionmnist --prune \
+    --pruner=causalpruner --causal_pruner_batch_size=16 \
+    --causal_pruner_l1_regularization_coeff=1e-16
 
 
 # CIFAR10
 
-## LeNet
+# LeNet
 python main.py --model=lenet --dataset=cifar10 --no-prune
-python main.py --model=lenet --dataset=cifar10 --prune --pruner=causalpruner
-python main.py --model=lenet --dataset=cifar10 --prune --pruner=magpruner
+
+python main.py --model=lenet --dataset=cifar10 --prune \
+    --pruner=causalpruner --causal_pruner_l1_regularization_coeff=1e-14
+
+python main.py --model=lenet --dataset=cifar10 --prune \
+    --pruner=magpruner --mag_prune_amount=0.275
 
 ## AlexNet
 python main.py --model=alexnet --dataset=cifar10 --no-prune
+
 python main.py --model=alexnet --dataset=cifar10 --prune \
-    --pruner=causalpruner --causal_pruner_batch_size=16
+    --pruner=causalpruner --causal_pruner_batch_size=16 \
+    --causal_pruner_l1_regularization_coeff=1e-16
+
 python main.py --model=alexnet --dataset=cifar10 --prune \
-     --pruner=magpruner
-
-## ResNet18`
-python main.py --model=resnet18 --dataset=cifar10 --no-prune
-python main.py --model=resnet18 --dataset=cifar10 --prune \
-    --pruner=causalpruner --causal_pruner_batch_size=16
-python main.py --model=resnet18 --dataset=cifar10 --prune \
-     --pruner=magpruner
-
-
-# Mini Imagenet
-
-## LeNet
-python main.py --model=lenet --dataset=miniimagenet --no-prune
-python main.py --model=lenet --dataset=miniimagenet --prune --pruner=causalpruner
-python main.py --model=lenet --dataset=miniimagenet --prune --pruner=magpruner
-
-## AlexNet
-python main.py --model=alexnet --dataset=miniimagenet --no-prune
-python main.py --model=alexnet --dataset=miniimagenet --prune \
-    --pruner=causalpruner --causal_pruner_batch_size=16
-python main.py --model=alexnet --dataset=miniimagenet --prune \
-     --pruner=magpruner
-
-## ResNet18
-python main.py --model=resnet18 --dataset=miniimagenet --no-prune
-python main.py --model=resnet18 --dataset=miniimagenet --prune \
-    --pruner=causalpruner --causal_pruner_batch_size=16
-python main.py --model=resnet18 --dataset=miniimagenet --prune \
-     --pruner=magpruner
+     --pruner=magpruner --mag_prune_amount=0.275
