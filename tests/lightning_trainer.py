@@ -9,6 +9,7 @@ sys.path.insert(
 
 import argparse
 import os
+from tqdm.auto import tqdm, trange
 
 from lightning.fabric import Fabric
 import torch
@@ -39,24 +40,19 @@ def train_model(fabric: Fabric,
                 optimizer: optim.Optimizer,
                 trainloader: DataLoader,
                 testloader: DataLoader,
-                num_epochs: int,
-                num_batches: int):
+                num_epochs: int):
     print('Training model')
-    model.train()
 
-    for epoch in range(num_epochs):
+    for epoch in (pbar := trange(num_epochs, leave=False)):
         model.train()
-        for idx, data in enumerate(trainloader):
-            inputs, labels = data
+        for (inputs, labels) in tqdm(trainloader, leave=False):
+            optimizer.zero_grad(set_to_none=True)
             outputs = model(inputs)
             loss = F.cross_entropy(outputs, labels)
             fabric.backward(loss)
             optimizer.step()
-            optimizer.zero_grad(set_to_none=True)
-            if idx >= num_batches:
-                break
         accuracy = eval_model(fabric, model, testloader)
-        print(f'Epoch: {epoch}; Accuracy: {accuracy}')
+        pbar.set_description(f'Epoch: {epoch + 1}; Accuracy: {accuracy:.4f}')
 
 
 @torch.no_grad
@@ -65,7 +61,7 @@ def eval_model(fabric: Fabric,
                testloader: DataLoader) -> float:
     model.eval()
     accuracy = MulticlassAccuracy().to(fabric.device)
-    for data in testloader:
+    for data in tqdm(testloader, leave=False):
         inputs, labels = data
         outputs = model(inputs)
         accuracy.update(outputs, labels)
@@ -138,8 +134,7 @@ def main(args: argparse.Namespace):
                     optimizer,
                     trainloader,
                     testloader,
-                    args.num_train_epochs,
-                    args.num_train_batches)
+                    args.num_train_epochs)
         if args.trained_model_checkpoint != '':
             fabric.save(args.trained_model_checkpoint, model.state_dict())
 
@@ -148,7 +143,7 @@ def main(args: argparse.Namespace):
     print(f'Model: {model_name}')
     print(f'Dataset: {dataset_name}')
     print_prune_stats(model)
-    print(f'Accuracy: {accuracy}')
+    print(f'Accuracy: {accuracy:.6f}')
 
 
 def parse_args() -> argparse.Namespace:
@@ -169,7 +164,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--device_ids',
                         nargs='+',
                         type=int,
-                        default=[-1],
+                        default=-1,
                         help='The device ids. Useful for multi device systems')
     parser.add_argument(
         '--num_dataset_workers', type=int, default=4,
@@ -187,9 +182,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--trained_model_checkpoint',
                         type=str, default='',
                         help='Path to write trained model checkpoint. Used if not empty')
-    parser.add_argument('--num_train_batches',
-                        type=int, default=-1,
-                        help='Controls the number of train batches. Set to a positive value to limit training to a subset of the dataset')
     parser.add_argument('--num_train_epochs', type=int, default=1,
                         help='Number of training epochs')
     parser.add_argument('--lr', type=float, default=3e-4,
