@@ -8,16 +8,14 @@ sys.path.insert(
 # autopep: on
 
 import argparse
-import os
-from tqdm.auto import tqdm, trange
 
-from lightning.fabric import Fabric
+import lightning.pytorch as L
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from torcheval.metrics import MulticlassAccuracy
+import torchmetrics
 
 from causalpruner import (
     Pruner,
@@ -33,40 +31,6 @@ def load_model(model: nn.Module, path: str):
     Pruner.apply_identity_masks_to_model(model)
     print(f'Model loaded from {path}')
     model.load_state_dict(torch.load(path))
-
-
-def train_model(fabric: Fabric,
-                model: nn.Module,
-                optimizer: optim.Optimizer,
-                trainloader: DataLoader,
-                testloader: DataLoader,
-                num_epochs: int):
-    print('Training model')
-
-    for epoch in (pbar := trange(num_epochs, leave=False)):
-        model.train()
-        for (inputs, labels) in tqdm(trainloader, leave=False):
-            optimizer.zero_grad(set_to_none=True)
-            outputs = model(inputs)
-            loss = F.cross_entropy(outputs, labels)
-            fabric.backward(loss)
-            optimizer.step()
-        accuracy = eval_model(fabric, model, testloader)
-        pbar.set_description(f'Epoch: {epoch + 1}; Accuracy: {accuracy:.4f}')
-
-
-@torch.no_grad
-def eval_model(fabric: Fabric,
-               model: nn.Module,
-               testloader: DataLoader) -> float:
-    model.eval()
-    accuracy = MulticlassAccuracy().to(fabric.device)
-    for data in tqdm(testloader, leave=False):
-        inputs, labels = data
-        outputs = model(inputs)
-        accuracy.update(outputs, labels)
-    accuracy = accuracy.compute().item()
-    return accuracy
 
 
 @torch.no_grad
@@ -95,55 +59,87 @@ def print_prune_stats(model: nn.Module):
     print('======================================================')
 
 
+class ModuleLightningModule(L.LightningModule):
+
+    def __init__(self, model: nn.Module, num_classes: int, lr: float):
+        super().__init__()
+        self.model = model
+        self.lr = lr
+        self.accuracy = torchmetrics.classification.Accuracy(
+            task="multiclass", num_classes=num_classes)
+
+    def load_model(self, path):
+        load_model(self.model, path)
+
+    def configure_optimizers(self):
+        optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
+        return optimizer
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        return self.model(inputs)
+
+    def training_step(
+            self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
+        inputs, labels = batch
+        outputs = self(inputs)
+        loss = F.cross_entropy(outputs, labels)
+        self.log('train_loss', loss, on_epoch=True, prog_bar=True)
+        return loss
+
+    def validation_step(
+            self, batch: torch.Tensor, batch_idx: int):
+        inputs, labels = batch
+        outputs = self(inputs)
+        self.accuracy(outputs, labels)
+        self.log('val_acc', self.accuracy, on_epoch=True, prog_bar=True)
+
+
 def main(args: argparse.Namespace):
     print(args)
-
-    fabric = Fabric(devices=args.device_ids, accelerator='auto')
-    fabric.launch()
 
     model_name = args.model
     dataset_name = args.dataset
     dataset_root_dir = args.dataset_root_dir
     model_checkpoint = args.model_checkpoint
 
-    model = get_model(model_name, dataset_name)
-    if model_checkpoint != '':
-        load_model(model, model_checkpoint)
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    devices = [0]
+    if args.device_ids != '':
+        devices = list(
+            map(lambda a: int(a.strip()), args.device_ids.split(',')))
+
+    print(f'Model: {model_name}')
+    print(f'Dataset: {dataset_name}')
 
     num_workers = args.num_dataset_workers
     persistent_workers = num_workers > 0
 
-    train_dataset, test_dataset, _ = get_dataset(
+    train_dataset, test_dataset, num_classes = get_dataset(
         dataset_name, model_name, root_dir=dataset_root_dir)
     trainloader = DataLoader(train_dataset, batch_size=args.batch_size,
-                                 shuffle=args.shuffle, pin_memory=True, num_workers=num_workers,
-                                 persistent_workers=persistent_workers)
+                             pin_memory=True, num_workers=num_workers,
+                             persistent_workers=persistent_workers)
     testloader = DataLoader(
         test_dataset, batch_size=args.batch_size,
-        shuffle=False, pin_memory=True,
-        num_workers=num_workers,
+        pin_memory=True, num_workers=num_workers,
         persistent_workers=persistent_workers)
 
-    model, optimizer = fabric.setup(model, optimizer)
-    trainloader, testloader = fabric.setup_dataloaders(trainloader, testloader)
+    model = get_model(model_name, dataset_name)
+    lightning_module = ModuleLightningModule(model, num_classes, args.lr)
+    if model_checkpoint != '':
+        lightning_module.load_model(model_checkpoint)
 
-    if args.train:
-        train_model(fabric,
-                    model,
-                    optimizer,
-                    trainloader,
-                    testloader,
-                    args.num_train_epochs)
-        if args.trained_model_checkpoint != '':
-            fabric.save(args.trained_model_checkpoint, model.state_dict())
+    trainer = L.Trainer(devices=devices, 
+                        max_epochs=args.num_train_epochs)
+    trainer.fit(
+        lightning_module,
+        train_dataloaders=trainloader,
+        val_dataloaders=testloader)
 
-    accuracy = eval_model(fabric, model, testloader)
-
-    print(f'Model: {model_name}')
-    print(f'Dataset: {dataset_name}')
+    trainer.validate(lightning_module, dataloaders=testloader)
     print_prune_stats(model)
-    print(f'Accuracy: {accuracy:.6f}')
+
+    torch.save(lightning_module.model.state_dict(), 
+               args.trained_model_checkpoint)
 
 
 def parse_args() -> argparse.Namespace:
@@ -162,9 +158,8 @@ def parse_args() -> argparse.Namespace:
         '--dataset_root_dir', type=str, default='../data',
         help='Directory to download datasets')
     parser.add_argument('--device_ids',
-                        nargs='+',
-                        type=int,
-                        default=-1,
+                        type=str,
+                        default='',
                         help='The device ids. Useful for multi device systems')
     parser.add_argument(
         '--num_dataset_workers', type=int, default=4,
@@ -175,10 +170,6 @@ def parse_args() -> argparse.Namespace:
         help='Whether to shuffle the test datasets')
     parser.add_argument('--batch_size', type=int,
                         default=256, help='Batch size')
-    parser.add_argument(
-        '--train', action=argparse.BooleanOptionalAction,
-        default=False,
-        help='Whether to train the model before evaling')
     parser.add_argument('--trained_model_checkpoint',
                         type=str, default='',
                         help='Path to write trained model checkpoint. Used if not empty')

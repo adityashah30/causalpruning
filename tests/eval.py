@@ -63,8 +63,11 @@ def train_model(model: nn.Module,
             optimizer.zero_grad(set_to_none=True)
             if idx >= num_batches:
                 break
+        batch_pbar.close()
         accuracy = eval_model(model, testloader, device)
-        tqdm.write(f'Epoch: {epoch}; Accuracy: {accuracy}')
+        epoch_pbar.set_description(f'Epoch: {epoch + 1}; '
+                                   f'Accuracy: {accuracy:.4f}')
+    epoch_pbar.close()
 
 
 @torch.no_grad
@@ -73,7 +76,7 @@ def eval_model(model: nn.Module,
                device: torch.device) -> float:
     model.eval()
     accuracy = MulticlassAccuracy().to(device)
-    for data in tqdm(testloader):
+    for data in tqdm(testloader, leave=False):
         inputs, labels = data
         inputs = inputs.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True)
@@ -117,17 +120,6 @@ def main(args: argparse.Namespace):
     model_checkpoint = args.model_checkpoint
     device = best_device(args.device_id)
 
-    model = get_model(model_name, dataset_name)
-    if model_checkpoint != '':
-        load_model(model, model_checkpoint)
-    model = model.to(device)
-    # Handle BatchNormLayers
-    for module in model.parameters():
-        if (isinstance(module, nn.BatchNorm1d) or
-            isinstance(module, nn.BatchNorm2d) or
-            isinstance(module, nn.BatchNorm3d)):
-            module.reset_parameters()
-
     train_dataset, test_dataset, _ = get_dataset(
         dataset_name, model_name, root_dir=dataset_root_dir)
     testloader = DataLoader(
@@ -135,6 +127,11 @@ def main(args: argparse.Namespace):
         shuffle=args.shuffle, pin_memory=True,
         num_workers=args.num_workers,
         persistent_workers=args.num_workers > 0)
+    
+    model = get_model(model_name, dataset_name)
+    if model_checkpoint != '':
+        load_model(model, model_checkpoint)
+    model = model.to(device)
 
     if args.train:
         trainloader = DataLoader(train_dataset, batch_size=args.batch_size,
