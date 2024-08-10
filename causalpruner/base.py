@@ -69,8 +69,8 @@ class Pruner(ABC):
         self.device = config.device
         self.iteration = -1
 
-        self.modules_dict = nn.ModuleDict()
-        self.reset_modules_dict = nn.ModuleDict()
+        self.modules_dict = dict()
+        self.reset_modules_dict = dict()
         for name, module in self.config.model.named_modules():
             if self.is_module_supported(module):
                 self.modules_dict[name] = module
