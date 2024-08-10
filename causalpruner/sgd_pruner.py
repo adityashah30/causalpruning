@@ -110,6 +110,7 @@ class ParamDataset(Dataset):
 class SGDPrunerConfig(PrunerConfig):
     preload: bool
     batch_size: int
+    num_dataloader_workers: int
     multiprocess_checkpoint_writer: bool
     delete_checkpoint_dir_after_training: bool
     trainer_config: CausalWeightsTrainerConfig
@@ -216,13 +217,14 @@ class SGDPruner(Pruner):
         batch_size = self.config.batch_size
         if batch_size < 0 or not trainer.supports_batch_training():
             batch_size = len(dataset)
+        num_workers = self.config.num_dataloader_workers
         dataloader = DataLoader(
             dataset,
             batch_size=batch_size,
             pin_memory=True,
             shuffle=True,
-            num_workers=1,
-            persistent_workers=True)
+            num_workers=num_workers,
+            persistent_workers=num_workers > 0)
         num_iters = trainer.fit(dataloader)
         if num_iters == self.trainer_config.max_iter:
             tqdm.write(f'{param} pruning failed to converge in ' +

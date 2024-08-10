@@ -145,6 +145,7 @@ def main(args):
                 eval_after_epoch=args.eval_after_epoch,
                 reset_weights=args.reset_weights_after_pruning,
                 batch_size=args.causal_pruner_batch_size,
+                num_dataloader_workers=args.num_causal_pruner_dataloader_workers,
                 multiprocess_checkpoint_writer=args.causal_pruner_multiprocessing_checkpoint_writer,
                 preload=args.causal_pruner_preload,
                 trainer_config=causal_weights_trainer_config,
@@ -288,6 +289,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--causal_pruner_batch_size', type=int, default=64,
         help='Batch size for causal pruner training. Use -1 to use the entire dataset')
+    parser.add_argument(
+        '--num_causal_pruner_dataloader_workers', type=int, default=1,
+        help='Number of DataLoader workers to use while training prune weights')
     parser.add_argument(
         '--causal_pruner_preload', action=argparse.BooleanOptionalAction,
         default=False,
