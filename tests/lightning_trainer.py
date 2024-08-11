@@ -114,7 +114,10 @@ def main(args: argparse.Namespace):
     persistent_workers = num_workers > 0
 
     train_dataset, test_dataset, num_classes = get_dataset(
-        dataset_name, model_name, root_dir=dataset_root_dir)
+        dataset_name, 
+        model_name, 
+        data_root_dir=dataset_root_dir, 
+        cache_size_limit_gb=args.cache_size_limit_gb)
     trainloader = DataLoader(train_dataset, batch_size=args.batch_size,
                              pin_memory=True, num_workers=num_workers,
                              persistent_workers=persistent_workers)
@@ -164,6 +167,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--num_dataset_workers', type=int, default=4,
         help='Number of dataset workers')
+    parser.add_argument('--dataset_cache_size_limit_gb', type=int,
+                        default=8, 
+                        help='Size limit for dataset stochastic cache')
     parser.add_argument(
         '--shuffle', action=argparse.BooleanOptionalAction,
         default=True,

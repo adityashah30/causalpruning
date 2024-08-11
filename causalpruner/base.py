@@ -36,23 +36,10 @@ class Pruner(ABC):
         nn.Conv3d,
     ]
 
-    _MODULES_TO_RESET = [
-        nn.BatchNorm1d,
-        nn.BatchNorm2d,
-        nn.BatchNorm3d,
-    ]
-
     @staticmethod
     def is_module_supported(module: nn.Module) -> bool:
         for supported_module in Pruner._SUPPORTED_MODULES:
             if isinstance(module, supported_module):
-                return True
-        return False
-
-    @staticmethod
-    def is_module_to_be_reset(module: nn.Module) -> bool:
-        for module_to_reset in Pruner._MODULES_TO_RESET:
-            if isinstance(module, module_to_reset):
                 return True
         return False
 
@@ -70,12 +57,9 @@ class Pruner(ABC):
         self.iteration = -1
 
         self.modules_dict = dict()
-        self.reset_modules_dict = dict()
         for name, module in self.config.model.named_modules():
             if self.is_module_supported(module):
                 self.modules_dict[name] = module
-            if self.is_module_to_be_reset(module):
-                self.reset_modules_dict[name] = module
 
         self.params = []
         for module_name, module in self.modules_dict.items():
@@ -164,6 +148,3 @@ class Pruner(ABC):
         for name, module in self.modules_dict.items():
             if name in masks:
                 prune.custom_from_mask(module, 'weight', masks[name])
-        for module in self.reset_modules_dict.values():
-            if hasattr(module, 'reset_parameters'):
-                module.reset_parameters()

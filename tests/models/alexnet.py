@@ -58,4 +58,6 @@ def get_alexnet(dataset: str) -> nn.Module:
         return AlexNet(num_classes=10, num_channels=3)
     elif dataset == 'fashionmnist':
         return AlexNet(num_classes=10, num_channels=1)
+    elif dataset == 'tinyimagenet':
+        return AlexNet(num_classes=200, num_channels=3)
     raise NotImplementedError(f'AlexNet is not available for {dataset}')

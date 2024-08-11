@@ -94,6 +94,10 @@ def get_resnet18(dataset: str) -> nn.Module:
         model = ResNet18(n_classes=10, kernel=3, stride=1, padding=1)
         model = initialize_model_weights(model)
         return model
+    elif dataset == 'tinyimagenet':
+        model = ResNet18(n_classes=200, kernel=7, stride=2, padding=3)
+        model = initialize_model_weights(model)
+        return model
     raise NotImplementedError(f'Resnet18 is not available for {dataset}')
 
 

@@ -207,13 +207,13 @@ def parse_args() -> argparse.Namespace:
         help='Model id to save post training. The saved model path is "model.{model_to_save_after_training}.ckpt')
     # Dataset args
     parser.add_argument('--dataset', type=str,
-                        choices=['cifar10', 'fashionmnist', 'imagenet'],
+                        choices=['cifar10', 'fashionmnist', 'imagenet', 'tinyimagenet'],
                         default='cifar10', help='Dataset name')
     parser.add_argument(
         '--dataset_root_dir', type=str, default='../data',
         help='Directory to download datasets')
     parser.add_argument(
-        '--num_dataset_workers', type=int, default=0,
+        '--num_dataset_workers', type=int, default=4,
         help='Number of dataset workers')
     parser.add_argument(
         '--shuffle_dataset', action=argparse.BooleanOptionalAction,

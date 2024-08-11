@@ -49,4 +49,6 @@ def get_lenet(dataset: str) -> nn.Module:
         return LeNet(num_classes=10, size_input=(3, 32, 32))
     elif dataset == 'fashionmnist':
         return LeNet(num_classes=10, size_input=(1, 28, 28))
-    raise NotImplementedError(f'Lenet is not available for {dataset}')
+    elif dataset == 'tinyimagenet':
+        return LeNet(num_classes=200, size_input=(3, 64, 64))
+    raise NotImplementedError(f'LeNet is not available for {dataset}')
