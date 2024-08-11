@@ -95,7 +95,8 @@ def main(args):
         delete_dir_if_exists(checkpoint_dir)
         delete_dir_if_exists(tensorboard_dir)
     train_dataset, test_dataset, num_classes = get_dataset(
-        dataset_name, model_name, args.dataset_root_dir, args.recompute_dataset)
+        dataset_name, model_name, args.dataset_root_dir, 
+        cache_size_limit_gb=args.dataset_cache_size_limit_gb)
     device_id = args.device_id
     model = get_model(model_name, dataset_name).to(best_device(device_id))
     prune_optimizer = get_prune_optimizer(
@@ -212,10 +213,6 @@ def parse_args() -> argparse.Namespace:
         '--dataset_root_dir', type=str, default='../data',
         help='Directory to download datasets')
     parser.add_argument(
-        '--recompute_dataset', action=argparse.BooleanOptionalAction,
-        default=False,
-        help='Recomputes dataset transformations if true -- loads existing otherwise')
-    parser.add_argument(
         '--num_dataset_workers', type=int, default=0,
         help='Number of dataset workers')
     parser.add_argument(
@@ -224,6 +221,9 @@ def parse_args() -> argparse.Namespace:
         help='Whether to shuffle the train and test datasets')
     parser.add_argument('--batch_size', type=int,
                         default=512, help='Batch size')
+    parser.add_argument('--dataset_cache_size_limit_gb', type=int,
+                        default=4, 
+                        help='Size limit for dataset stochastic cache')
     # Dirs
     parser.add_argument(
         '--checkpoint_dir', type=str, default='../checkpoints',

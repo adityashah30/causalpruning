@@ -1,62 +1,11 @@
 import os
+from typing import Optional, Callable
+
+from stocaching import SharedCache
 import torch
 import torch.utils.data as data
-import torchvision.datasets as datasets
+from torchvision.datasets import FashionMNIST
 from torchvision.transforms import v2
-from tqdm.auto import trange
-
-
-class TransformedFashionMNIST(datasets.FashionMNIST):
-
-    _TRAIN_FPATH = 'train.pth'
-    _TEST_FPATH = 'test.pth'
-
-    def __init__(
-            self, root: str, size: int, train: bool = True,
-            recompute: bool = False, transforms: list[v2.Transform] = []):
-        mnist_root = os.path.join(root, 'fashion_mnist')
-
-        super().__init__(
-            mnist_root, train, download=True,
-            transform=v2.Compose(transforms))
-
-        size_dir = os.path.join(self.root, f'{size}x{size}')
-        os.makedirs(size_dir, exist_ok=True)
-
-        file_path = self._TRAIN_FPATH if train else self._TEST_FPATH
-        self.fpath = os.path.join(size_dir, file_path)
-
-        if recompute or not os.path.exists(self.fpath):
-            self.transform_and_save()
-        else:
-            print('Data already transformed and saved')
-
-        self.load_data()
-
-    @torch.no_grad
-    def transform_and_save(self):
-        data = []
-        targets = []
-        for idx in trange(super().__len__()):
-            datum, target = super().__getitem__(idx)
-            data.append(datum)
-            targets.append(target)
-        data = torch.stack(data, dim=0)
-        targets = torch.tensor(targets)
-        torch.save({'data': data, 'targets': targets}, self.fpath)
-
-    @torch.no_grad
-    def load_data(self):
-        dict = torch.load(self.fpath)
-        self.data = dict['data']
-        self.targets = dict['targets']
-
-    @torch.no_grad
-    def __getitem__(self, idx) -> tuple[torch.Tensor, torch.Tensor]:
-        return self.data[idx], self.targets[idx]
-
-    def __len__(self) -> int:
-        return len(self.data)
 
 
 _DEFAULT_TRANSFORMS = [
@@ -66,36 +15,82 @@ _DEFAULT_TRANSFORMS = [
 ]
 
 
+class CachedFashionMNIST(FashionMNIST):
+
+    def __init__(self,
+                 root_dir: str,
+                 train: bool,
+                 transform: Optional[Callable],
+                 download: bool,
+                 cache_size_limit_gb: int = 4):
+        super().__init__(root_dir, train, transform, download=download)
+        num_items = super().__len__()
+        self.input_cache = SharedCache(
+            size_limit_gib=cache_size_limit_gb,
+            dataset_len=num_items,
+            data_dims=(1, 28, 28),
+            dtype=torch.float32)
+        self.label_cache = SharedCache(
+            size_limit_gib=max(cache_size_limit_gb // 1000, 1),
+            dataset_len=num_items,
+            data_dims=(),
+            dtype=torch.int64)
+
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+        inputs = self.input_cache.get_slot(idx)
+        if inputs is None:
+            inputs, labels = super().__getitem__(idx)
+            self.input_cache.set_slot(idx, inputs)
+            self.label_cache.set_slot(idx, labels)
+        labels = self.label_cache.get_slot(idx)
+        assert labels is not None
+        return (inputs, labels)
+
+
 @torch.no_grad
 def get_fashion_mnist(
         model_name: str,
-        root_dir: str,
-        recompute: bool = False) -> tuple[data.Dataset, data.Dataset]:
+        data_root_dir: str,
+        cache_size_limit_gb: int = 4) -> tuple[data.Dataset, data.Dataset]:
     model_name = model_name.lower()
-    if model_name in ['lenet', 'fullyconnected']:
-        train = TransformedFashionMNIST(
-            root_dir, size=28, train=True, recompute=recompute,
-            transforms=_DEFAULT_TRANSFORMS)
-        test = TransformedFashionMNIST(
-            root_dir, size=28, train=False, recompute=recompute,
-            transforms=_DEFAULT_TRANSFORMS)
+    fashionmnist_root_dir = os.path.join(data_root_dir, 'fashionmnist')
+    if model_name == 'lenet':
+        transform = v2.Compose(_DEFAULT_TRANSFORMS)
+        train = CachedFashionMNIST(fashionmnist_root_dir,
+                                   train=True,
+                                   transform=transform,
+                                   download=True,
+                                   cache_size_limit_gb=cache_size_limit_gb)
+        test = CachedFashionMNIST(fashionmnist_root_dir,
+                                  train=False,
+                                  transform=transform,
+                                  download=True,
+                                  cache_size_limit_gb=cache_size_limit_gb)
         return (train, test)
     elif model_name == 'resnet18':
-        TRANSFORMS = [v2.Resize((32, 32))] + _DEFAULT_TRANSFORMS
-        train = TransformedFashionMNIST(
-            root_dir, size=32, train=True, recompute=recompute,
-            transforms=TRANSFORMS)
-        test = TransformedFashionMNIST(
-            root_dir, size=32, train=False, recompute=recompute,
-            transforms=TRANSFORMS)
+        transform = v2.Compose([v2.Resize((32, 32))] + _DEFAULT_TRANSFORMS)
+        train = CachedFashionMNIST(fashionmnist_root_dir,
+                                   train=True,
+                                   transform=transform,
+                                   download=True,
+                                   cache_size_limit_gb=cache_size_limit_gb)
+        test = CachedFashionMNIST(fashionmnist_root_dir,
+                                  train=False,
+                                  transform=transform,
+                                  download=True,
+                                  cache_size_limit_gb=cache_size_limit_gb)
         return (train, test)
     elif model_name == 'alexnet':
-        TRANSFORMS = [v2.Resize((227, 227))] + _DEFAULT_TRANSFORMS
-        train = TransformedFashionMNIST(
-            root_dir, size=227, train=True, recompute=recompute,
-            transforms=TRANSFORMS)
-        test = TransformedFashionMNIST(
-            root_dir, size=227, train=False, recompute=recompute,
-            transforms=TRANSFORMS)
+        transform = v2.Compose([v2.Resize((227, 227))] + _DEFAULT_TRANSFORMS)
+        train = CachedFashionMNIST(fashionmnist_root_dir,
+                                   train=True,
+                                   transform=transform,
+                                   download=True,
+                                   cache_size_limit_gb=cache_size_limit_gb)
+        test = CachedFashionMNIST(fashionmnist_root_dir,
+                                  train=False,
+                                  transform=transform,
+                                  download=True,
+                                  cache_size_limit_gb=cache_size_limit_gb)
         return (train, test)
-    raise NotImplementedError(f'FashionMNIST not available for {model_name}')
+    raise NotImplementedError(f'CIFAR10 not available for {model_name}')

@@ -8,9 +8,9 @@ from torchvision.transforms import v2
 @torch.no_grad
 def get_imagenet(
         model_name: str,
-        root_dir: str) -> tuple[data.Dataset, data.Dataset]:
+        data_root_dir: str) -> tuple[data.Dataset, data.Dataset]:
     model_name = model_name.lower()
-    imagenet_root = os.path.join(root_dir, 'imagenet')
+    imagenet_root = os.path.join(data_root_dir, 'imagenet')
     if model_name == 'resnet50':
         default_transforms = [
             v2.ToImage(),
