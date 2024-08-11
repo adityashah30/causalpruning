@@ -222,7 +222,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--batch_size', type=int,
                         default=512, help='Batch size')
     parser.add_argument('--dataset_cache_size_limit_gb', type=int,
-                        default=4, 
+                        default=8, 
                         help='Size limit for dataset stochastic cache')
     # Dirs
     parser.add_argument(
