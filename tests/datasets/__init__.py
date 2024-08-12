@@ -11,7 +11,7 @@ import torch.utils.data as data
 def get_dataset(dataset_name: str,
                 model_name: str,
                 data_root_dir: str,
-                cache_size_limit_gb: int) -> tuple[
+                cache_size_limit_gb: int = 8) -> tuple[
                     data.Dataset, data.Dataset, int]:
     model_name = model_name.lower()
     dataset_name = dataset_name.lower()

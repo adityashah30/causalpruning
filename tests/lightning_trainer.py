@@ -10,12 +10,15 @@ sys.path.insert(
 import argparse
 
 import lightning.pytorch as L
+from lightning.pytorch.callbacks import (
+    LearningRateMonitor,
+    ModelCheckpoint,
+)
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
-import torchmetrics
 
 from causalpruner import (
     Pruner,
@@ -30,7 +33,10 @@ def load_model(model: nn.Module, path: str):
         return
     Pruner.apply_identity_masks_to_model(model)
     print(f'Model loaded from {path}')
-    model.load_state_dict(torch.load(path))
+    state_dict = torch.load(path)
+    if 'state_dict' in state_dict:
+        state_dict = state_dict['state_dict']
+    model.load_state_dict(state_dict)
 
 
 @torch.no_grad
@@ -61,19 +67,30 @@ def print_prune_stats(model: nn.Module):
 
 class ModuleLightningModule(L.LightningModule):
 
-    def __init__(self, model: nn.Module, num_classes: int, lr: float):
+    def __init__(self,
+                 model: nn.Module,
+                 lr: float,
+                 lr_reduce_factor: float = 0.5):
         super().__init__()
         self.model = model
         self.lr = lr
-        self.accuracy = torchmetrics.classification.Accuracy(
-            task="multiclass", num_classes=num_classes)
+        self.lr_reduce_factor = lr_reduce_factor
+        self.val_step_outputs = []
 
     def load_model(self, path):
         load_model(self.model, path)
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
-        return optimizer
+        lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode='max',
+            factor=self.lr_reduce_factor,
+            patience=3,
+        )
+        return {'optimizer': optimizer,
+                'lr_scheduler': lr_scheduler,
+                'monitor': 'val_acc'}
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         return self.model(inputs)
@@ -90,17 +107,75 @@ class ModuleLightningModule(L.LightningModule):
             self, batch: torch.Tensor, batch_idx: int):
         inputs, labels = batch
         outputs = self(inputs)
-        self.accuracy(outputs, labels)
-        self.log('val_acc', self.accuracy, on_epoch=True, prog_bar=True)
+        self.val_step_outputs.append({
+            'acc': (outputs.argmax(dim=1) == labels).float().sum(),
+            'size': len(outputs)
+            })
+
+    def on_validation_epoch_end(self):
+        val_acc = torch.stack([x['acc'] for x in self.val_step_outputs]).sum()
+        val_size = torch.tensor([x['size'] for x in self.val_step_outputs]).sum()
+        val_acc = val_acc/val_size
+        self.log('val_acc', val_acc, prog_bar=True, sync_dist=True)
+        self.val_step_outputs = []
 
 
-def main(args: argparse.Namespace):
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description='Plot pruning graphs')
+
+    parser.add_argument('--model', type=str,
+                        choices=['lenet', 'alexnet', 'resnet18', 'resnet50'],
+                        help='Model name')
+    parser.add_argument('--dataset', type=str,
+                        choices=['cifar10', 'fashionmnist', 'imagenet'],
+                        help='Dataset name')
+    parser.add_argument('--model_checkpoint_dir',
+                        type=str, default='',
+                        help='Model checkpoint fir')
+    parser.add_argument('--model_checkpoint',
+                        type=str, default='',
+                        help='The file name of the model checkpoint')
+    parser.add_argument(
+        '--dataset_root_dir', type=str, default='../data',
+        help='Directory to download datasets')
+    parser.add_argument('--device_ids',
+                        type=str,
+                        default='',
+                        help='The device ids. Useful for multi device systems')
+    parser.add_argument(
+        '--num_dataset_workers', type=int, default=4,
+        help='Number of dataset workers')
+    parser.add_argument(
+        '--shuffle', action=argparse.BooleanOptionalAction,
+        default=True,
+        help='Whether to shuffle the test datasets')
+    parser.add_argument('--batch_size', type=int,
+                        default=256, help='Batch size')
+    parser.add_argument('--trained_model_checkpoint',
+                        type=str, default='',
+                        help='Path to write trained model checkpoint. Used if not empty')
+    parser.add_argument('--num_train_epochs', type=int, default=1,
+                        help='Number of training epochs')
+    parser.add_argument('--lr', type=float, default=1e-3,
+                        help='Training optimizer learning rate')
+    parser.add_argument('--lr_reduce_factor', type=float, default=0.5,
+                        help='Rate at which learnign rate should be reduced when the metric plateaus')
+    parser.add_argument('--log_dir',
+                        type=str, default='../tensorboard',
+                        help='Log dir')
+
+    return parser.parse_args()
+
+
+if __name__ == '__main__':
+    args = parse_args()
     print(args)
 
     model_name = args.model
     dataset_name = args.dataset
     dataset_root_dir = args.dataset_root_dir
-    model_checkpoint = args.model_checkpoint
+    model_checkpoint_dir = args.model_checkpoint_dir
+    model_checkpoint = os.path.join(model_checkpoint_dir, args.model_checkpoint)
 
     devices = [0]
     if args.device_ids != '':
@@ -114,10 +189,7 @@ def main(args: argparse.Namespace):
     persistent_workers = num_workers > 0
 
     train_dataset, test_dataset, num_classes = get_dataset(
-        dataset_name, 
-        model_name, 
-        data_root_dir=dataset_root_dir, 
-        cache_size_limit_gb=args.cache_size_limit_gb)
+        dataset_name, model_name, data_root_dir=dataset_root_dir)
     trainloader = DataLoader(train_dataset, batch_size=args.batch_size,
                              pin_memory=True, num_workers=num_workers,
                              persistent_workers=persistent_workers)
@@ -127,12 +199,28 @@ def main(args: argparse.Namespace):
         persistent_workers=persistent_workers)
 
     model = get_model(model_name, dataset_name)
-    lightning_module = ModuleLightningModule(model, num_classes, args.lr)
+    lightning_module = ModuleLightningModule(
+        model, args.lr, args.lr_reduce_factor)
     if model_checkpoint != '':
         lightning_module.load_model(model_checkpoint)
 
-    trainer = L.Trainer(devices=devices, 
-                        max_epochs=args.num_train_epochs)
+
+    acc_callback = ModelCheckpoint(
+        dirpath=model_checkpoint_dir,
+        filename='{epoch:03d}-{val_acc:.4f}',
+        save_top_k=1,
+        monitor="val_acc",
+        mode="max",
+    )
+    lr_monitor = LearningRateMonitor(logging_interval="step")
+    trainer = L.Trainer(devices=devices,
+                        accelerator='gpu',
+                        max_epochs=args.num_train_epochs,
+                        callbacks=[acc_callback, lr_monitor],
+                        enable_progress_bar=True,
+                        check_val_every_n_epoch=1,
+                        log_every_n_steps=1,
+                        default_root_dir=args.log_dir)
     trainer.fit(
         lightning_module,
         train_dataloaders=trainloader,
@@ -141,52 +229,5 @@ def main(args: argparse.Namespace):
     trainer.validate(lightning_module, dataloaders=testloader)
     print_prune_stats(model)
 
-    torch.save(lightning_module.model.state_dict(), 
+    torch.save(lightning_module.model.state_dict(),
                args.trained_model_checkpoint)
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description='Plot pruning graphs')
-
-    parser.add_argument('--model', type=str,
-                        choices=['lenet', 'alexnet', 'resnet18', 'resnet50'],
-                        help='Model name')
-    parser.add_argument('--dataset', type=str,
-                        choices=['cifar10', 'fashionmnist', 'imagenet'],
-                        help='Dataset name')
-    parser.add_argument('--model_checkpoint',
-                        type=str, default='',
-                        help='Path to model checkpoint. Loads the checkpoint if model is given -- else uses the default version')
-    parser.add_argument(
-        '--dataset_root_dir', type=str, default='../data',
-        help='Directory to download datasets')
-    parser.add_argument('--device_ids',
-                        type=str,
-                        default='',
-                        help='The device ids. Useful for multi device systems')
-    parser.add_argument(
-        '--num_dataset_workers', type=int, default=4,
-        help='Number of dataset workers')
-    parser.add_argument('--dataset_cache_size_limit_gb', type=int,
-                        default=8, 
-                        help='Size limit for dataset stochastic cache')
-    parser.add_argument(
-        '--shuffle', action=argparse.BooleanOptionalAction,
-        default=True,
-        help='Whether to shuffle the test datasets')
-    parser.add_argument('--batch_size', type=int,
-                        default=256, help='Batch size')
-    parser.add_argument('--trained_model_checkpoint',
-                        type=str, default='',
-                        help='Path to write trained model checkpoint. Used if not empty')
-    parser.add_argument('--num_train_epochs', type=int, default=1,
-                        help='Number of training epochs')
-    parser.add_argument('--lr', type=float, default=3e-4,
-                        help='Training optimizer learning rate')
-
-    return parser.parse_args()
-
-
-if __name__ == '__main__':
-    args = parse_args()
-    main(args)
