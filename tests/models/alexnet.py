@@ -32,7 +32,6 @@ class AlexNet_32(nn.Module):
         self.maxpool3 = nn.MaxPool2d(kernel_size=2)
         H, W = _calc_output_size(H, 2, 2), _calc_output_size(W, 2, 2)
         flattened_dims = 256 * H * W
-        print(flattened_dims)
         self.fc1 = nn.Linear(flattened_dims, 4096)
         self.fc2 = nn.Linear(4096, 4096)
         self.fc3 = nn.Linear(4096, num_classes)

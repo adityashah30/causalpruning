@@ -25,8 +25,7 @@ class BasicBlock(nn.Module):
                 stride=stride, bias=True)
 
     def forward(self, x):
-        out = self.conv1(x)
-        out = F.relu(out)
+        out = F.relu(self.conv1(x))
         out = self.conv2(out)
         out += self.shortcut(x)
         out = F.relu(out)
@@ -34,12 +33,17 @@ class BasicBlock(nn.Module):
 
 
 class ResNet(nn.Module):
-    def __init__(
-            self, block, num_blocks, num_classes, kernel: int, stride: int,
-            padding: int):
+    def __init__(self,
+                 block: nn.Module,
+                 num_blocks: list[int],
+                 num_classes: int,
+                 num_channels: int,
+                 kernel: int,
+                 stride: int,
+                 padding: int):
         super().__init__()
         self.in_planes = 64
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=kernel,
+        self.conv1 = nn.Conv2d(num_channels, self.in_planes, kernel_size=kernel,
                                stride=stride, padding=padding, bias=True)
         self.layer1 = self._make_layer(block, 64, num_blocks[0], stride=1)
         self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2)
@@ -56,8 +60,7 @@ class ResNet(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        out = self.conv1(x)
-        out = F.relu(out)
+        out = F.relu(self.conv1(x))
         out = self.layer1(out)
         out = self.layer2(out)
         out = self.layer3(out)
@@ -69,19 +72,23 @@ class ResNet(nn.Module):
 
 
 def ResNet18(
-        n_classes: int, kernel: int, stride: int, padding: int) -> nn.Module:
-    return ResNet(BasicBlock, [2, 2, 2, 2], n_classes, kernel, stride, padding)
+        num_classes: int,
+        num_channels: int,
+        kernel: int,
+        stride: int,
+        padding: int) -> nn.Module:
+    return ResNet(
+        BasicBlock, [2, 2, 2, 2], num_classes, num_channels,
+        kernel, stride, padding)
 
 
 def initialize_model_weights(model: nn.Module) -> nn.Module:
-    rand_genarator = torch.Generator().manual_seed(56)
     for m in model.modules():
         if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
             nn.init.kaiming_normal_(
                 m.weight,
                 mode="fan_out",
                 nonlinearity="relu",
-                generator=rand_genarator,
             )
             if m.bias is not None:
                 nn.init.constant_(m.bias, 0)
@@ -90,12 +97,19 @@ def initialize_model_weights(model: nn.Module) -> nn.Module:
 
 def get_resnet18(dataset: str) -> nn.Module:
     dataset = dataset.lower()
-    if dataset in ['cifar10', 'fashionmnist']:
-        model = ResNet18(n_classes=10, kernel=3, stride=1, padding=1)
+    if dataset == 'cifar10':
+        model = ResNet18(num_classes=10, num_channels=3,
+                         kernel=3, stride=1, padding=1)
+        model = initialize_model_weights(model)
+        return model
+    elif dataset == 'fashionmnist':
+        model = ResNet18(num_classes=10, num_channels=1,
+                         kernel=3, stride=1, padding=1)
         model = initialize_model_weights(model)
         return model
     elif dataset == 'tinyimagenet':
-        model = ResNet18(n_classes=200, kernel=7, stride=2, padding=3)
+        model = ResNet18(num_classes=200, num_channels=3,
+                         kernel=7, stride=2, padding=3)
         model = initialize_model_weights(model)
         return model
     raise NotImplementedError(f'Resnet18 is not available for {dataset}')
