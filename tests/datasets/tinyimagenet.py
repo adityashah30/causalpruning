@@ -13,15 +13,15 @@ _DEFAULT_TRAIN_TRANSFORMS = [
     v2.ToImage(),
     v2.ToDtype(torch.float32, scale=True),
     v2.Normalize(
-        mean=(0.485, 0.456, 0.406),
-        std=(0.229, 0.224, 0.225))
+        mean=(0.4802, 0.4481, 0.3975),
+        std=(0.2764, 0.2689, 0.2816))
 ]
 _DEFAULT_TEST_TRANSFORMS = [
     v2.ToImage(),
     v2.ToDtype(torch.float32, scale=True),
     v2.Normalize(
-        mean=(0.485, 0.456, 0.406),
-        std=(0.229, 0.224, 0.225))
+        mean=(0.4802, 0.4481, 0.3975),
+        std=(0.2764, 0.2689, 0.2816))
 ]
 
 

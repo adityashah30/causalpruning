@@ -173,6 +173,7 @@ class SGDPruner(Pruner):
         params = self.param_checkpoint_dirs.items()
         if self.multiprocess_checkpoint_writer:
             concurrent.futures.wait(self.checkpoint_futures)
+            self.checkpoint_futures = []
         pbar_pruning = tqdm(total=len(params), leave=False)
         for param, param_dir in params:
             pbar_pruning.set_description(param)
