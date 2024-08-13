@@ -58,7 +58,7 @@ def get_cifar_10(
         cache_size_limit_gb: int) -> tuple[data.Dataset, data.Dataset]:
     model_name = model_name.lower()
     cifar_root_dir = os.path.join(data_root_dir, 'cifar10')
-    if model_name in ['lenet', 'fullyconnected', 'resnet18']:
+    if model_name in ['alexnet', 'lenet', 'resnet18']:
         train_transforms = v2.Compose(_DEFAULT_TRAIN_TRANSFORMS)
         test_transforms = v2.Compose(_DEFAULT_TEST_TRANSFORMS)
         train = CachedCIFAR10(cifar_root_dir,
@@ -69,24 +69,6 @@ def get_cifar_10(
                               cache_size_limit_gb=cache_size_limit_gb)
         test = CachedCIFAR10(cifar_root_dir,
                              size=32,
-                             train=False,
-                             transform=test_transforms,
-                             download=True,
-                             cache_size_limit_gb=cache_size_limit_gb)
-        return (train, test)
-    elif model_name == 'alexnet':
-        train_transforms = v2.Compose(
-            [v2.Resize((227, 227))] + _DEFAULT_TRAIN_TRANSFORMS)
-        test_transforms = v2.Compose(
-            [v2.Resize((227, 227))] + _DEFAULT_TEST_TRANSFORMS)
-        train = CachedCIFAR10(cifar_root_dir,
-                              size=227,
-                              train=True,
-                              transform=train_transforms,
-                              download=True,
-                              cache_size_limit_gb=cache_size_limit_gb)
-        test = CachedCIFAR10(cifar_root_dir,
-                             size=227,
                              train=False,
                              transform=test_transforms,
                              download=True,
