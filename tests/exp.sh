@@ -41,3 +41,14 @@ python main.py --model=alexnet --dataset=fashionmnist --no-prune
 python main.py --model=alexnet --dataset=fashionmnist --prune \
     --pruner=causalpruner --causal_pruner_batch_size=16 \
     --causal_pruner_l1_regularization_coeff=1e-16
+
+# Tiny ImageNet
+
+## LeNet
+python main.py --model=lenet --dataset=tinyimagenet --no-prune
+
+python main.py --model=lenet --dataset=tinyimagenet --prune \
+    --pruner=causalpruner --causal_pruner_l1_regularization_coeff=1e-14
+
+python main.py --model=lenet --dataset=tinyimagenet --prune \
+    --pruner=magpruner --mag_pruner_amount=0.275

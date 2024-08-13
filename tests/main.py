@@ -95,7 +95,7 @@ def main(args):
         delete_dir_if_exists(checkpoint_dir)
         delete_dir_if_exists(tensorboard_dir)
     train_dataset, test_dataset, num_classes = get_dataset(
-        dataset_name, model_name, args.dataset_root_dir, 
+        dataset_name, model_name, args.dataset_root_dir,
         cache_size_limit_gb=args.dataset_cache_size_limit_gb)
     device_id = args.device_id
     model = get_model(model_name, dataset_name).to(best_device(device_id))
@@ -187,7 +187,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--train_loss_num_epochs_no_change', type=int,
                         default=5,
                         help='Considers the model converged when train loss does not change by more than train_convergence_loss_tolerance for these many epochs')
-    parser.add_argument('--max_train_epochs', type=int, default=100,
+    parser.add_argument('--max_train_epochs', type=int, default=200,
                         help='Maximum number of epochs for train the model')
     parser.add_argument(
         '--train_optimizer', type=str, default='adam',
@@ -222,7 +222,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--batch_size', type=int,
                         default=512, help='Batch size')
     parser.add_argument('--dataset_cache_size_limit_gb', type=int,
-                        default=8, 
+                        default=8,
                         help='Size limit for dataset stochastic cache')
     # Dirs
     parser.add_argument(

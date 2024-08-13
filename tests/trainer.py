@@ -148,9 +148,6 @@ class Trainer:
             self._run_pre_prune()
             self._run_prune()
         self._run_training()
-        if self._should_prune():
-            self.pruner.apply_masks()
-        self._checkpoint_model(self.config.model_to_save_after_training)
         self.get_all_eval_metrics()
 
     def _run_pre_prune(self):
@@ -174,8 +171,8 @@ class Trainer:
                 loss = config.loss_fn(outputs, labels)
                 loss.backward()
                 if batch_counter % grad_step_num_batches == 0:
-                    config.prune_optimizer.step()
-                    config.prune_optimizer.zero_grad(set_to_none=True)
+                    config.train_optimizer.step()
+                    config.train_optimizer.zero_grad(set_to_none=True)
                 loss_avg.update(loss.item())
                 if (batch_counter + 1) % tqdm_update_frequency == 0:
                     pbar.update(tqdm_update_frequency)
@@ -258,6 +255,7 @@ class Trainer:
         grad_step_num_batches = epoch_config.grad_step_num_batches
         tqdm_update_frequency = epoch_config.tqdm_update_frequency
         best_loss = np.inf
+        best_accuracy = -np.inf
         iter_no_change = 0
         for epoch in range(epoch_config.num_train_epochs):
             self.global_step += 1
@@ -286,18 +284,23 @@ class Trainer:
             loss = loss_avg.avg
             self.writer.add_scalar('Loss/train', loss, self.global_step)
             accuracy = self.eval_model()
-            self.pbar.set_description(
-                f'Training: ' +
-                f'Epoch {epoch+1}/{epoch_config.num_train_epochs}; ' +
-                f'Loss/Train: {loss:.4f}; ' +
-                f'Best Loss/Train: {best_loss:.4f}; ' +
-                f'Accuracy/Test: {accuracy:.4f}')
+            if accuracy > best_accuracy:
+                best_accuracy = accuracy
+                self._checkpoint_model(
+                    self.config.model_to_save_after_training)
             if loss > (best_loss - config.train_convergence_loss_tolerance):
                 iter_no_change += 1
             else:
                 iter_no_change = 0
             if loss < best_loss:
                 best_loss = loss
+            self.pbar.set_description(
+                f'Training: ' +
+                f'Epoch {epoch+1}/{epoch_config.num_train_epochs}; ' +
+                f'Loss/Train: {loss:.4f}; ' +
+                f'Best Loss/Train: {best_loss:.4f}; ' +
+                f'Accuracy/Test: {accuracy:.4f}; ' +
+                f'Best Accuracy/Test: {best_accuracy:.4f}')
             if iter_no_change >= config.train_loss_num_epochs_no_change:
                 tqdm.write(f'Model converged in {epoch+1} epochs')
                 break

@@ -36,6 +36,7 @@ def load_model(model: nn.Module, path: str):
     state_dict = torch.load(path)
     if 'state_dict' in state_dict:
         state_dict = state_dict['state_dict']
+        state_dict = { k[6:]: v for k, v in state_dict.items()}
     model.load_state_dict(state_dict)
 
 

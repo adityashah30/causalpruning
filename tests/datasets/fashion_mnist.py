@@ -47,7 +47,7 @@ def get_fashion_mnist(
         cache_size_limit_gb: int) -> tuple[data.Dataset, data.Dataset]:
     model_name = model_name.lower()
     fashionmnist_root_dir = os.path.join(data_root_dir, 'fashionmnist')
-    if model_name == 'lenet':
+    if model_name in ['lenet', 'alexnet']:
         transform = v2.Compose(_DEFAULT_TRANSFORMS)
         train = CachedFashionMNIST(fashionmnist_root_dir,
                                    size=28,
@@ -72,21 +72,6 @@ def get_fashion_mnist(
                                    cache_size_limit_gb=cache_size_limit_gb)
         test = CachedFashionMNIST(fashionmnist_root_dir,
                                   size=32,
-                                  train=False,
-                                  transform=transform,
-                                  download=True,
-                                  cache_size_limit_gb=cache_size_limit_gb)
-        return (train, test)
-    elif model_name == 'alexnet':
-        transform = v2.Compose([v2.Resize((227, 227))] + _DEFAULT_TRANSFORMS)
-        train = CachedFashionMNIST(fashionmnist_root_dir,
-                                   size=227,
-                                   train=True,
-                                   transform=transform,
-                                   download=True,
-                                   cache_size_limit_gb=cache_size_limit_gb)
-        test = CachedFashionMNIST(fashionmnist_root_dir,
-                                  size=227,
                                   train=False,
                                   transform=transform,
                                   download=True,
