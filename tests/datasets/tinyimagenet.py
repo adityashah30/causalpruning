@@ -75,16 +75,16 @@ def get_tiny_imagenet(
         return (train, test)
     elif model_name == 'alexnet':
         train_transforms = v2.Compose(
-            [v2.Resize((227, 227))] + _DEFAULT_TRAIN_TRANSFORMS)
+            [v2.Resize((224, 224))] + _DEFAULT_TRAIN_TRANSFORMS)
         test_transforms = v2.Compose(
-            [v2.Resize((227, 227))] + _DEFAULT_TEST_TRANSFORMS)
+            [v2.Resize((224, 224))] + _DEFAULT_TEST_TRANSFORMS)
         train = CachedTinyImageNet(tinyimagenet_root_dir,
-                                   size=227,
+                                   size=224,
                                    train=True,
                                    transform=train_transforms,
                                    cache_size_limit_gb=cache_size_limit_gb)
         test = CachedTinyImageNet(tinyimagenet_root_dir,
-                                  size=227,
+                                  size=224,
                                   train=False,
                                   transform=test_transforms,
                                   cache_size_limit_gb=cache_size_limit_gb)

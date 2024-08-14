@@ -8,7 +8,7 @@ python main.py --model=resnet18 --dataset=fashionmnist --prune \
     --pruner=causalpruner --causal_pruner_l1_regularization_coeff=1e-16
 
 python main.py --model=resnet18 --dataset=fashionmnist --prune \
-    --pruner=magpruner --mag_prune_amount=0.1
+    --pruner=magpruner --mag_prune_amount=0.174
 
 # CIFAR10
 python main.py --model=resnet18 --dataset=cifar10 --no-prune
