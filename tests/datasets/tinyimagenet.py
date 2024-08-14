@@ -59,7 +59,7 @@ def get_tiny_imagenet(
         cache_size_limit_gb: int) -> tuple[data.Dataset, data.Dataset]:
     model_name = model_name.lower()
     tinyimagenet_root_dir = os.path.join(data_root_dir, 'tinyimagenet200')
-    if model_name in ['lenet', 'resnet18']:
+    if model_name == 'lenet':
         train_transforms = v2.Compose(_DEFAULT_TRAIN_TRANSFORMS)
         test_transforms = v2.Compose(_DEFAULT_TEST_TRANSFORMS)
         train = CachedTinyImageNet(tinyimagenet_root_dir,
@@ -85,6 +85,22 @@ def get_tiny_imagenet(
                                    cache_size_limit_gb=cache_size_limit_gb)
         test = CachedTinyImageNet(tinyimagenet_root_dir,
                                   size=224,
+                                  train=False,
+                                  transform=test_transforms,
+                                  cache_size_limit_gb=cache_size_limit_gb)
+        return (train, test)
+    elif model_name == 'resnet18':
+        train_transforms = v2.Compose(
+            [v2.Resize((32, 32))] + _DEFAULT_TRAIN_TRANSFORMS)
+        test_transforms = v2.Compose(
+            [v2.Resize((32, 32))] + _DEFAULT_TEST_TRANSFORMS)
+        train = CachedTinyImageNet(tinyimagenet_root_dir,
+                                   size=32,
+                                   train=True,
+                                   transform=train_transforms,
+                                   cache_size_limit_gb=cache_size_limit_gb)
+        test = CachedTinyImageNet(tinyimagenet_root_dir,
+                                  size=32,
                                   train=False,
                                   transform=test_transforms,
                                   cache_size_limit_gb=cache_size_limit_gb)
