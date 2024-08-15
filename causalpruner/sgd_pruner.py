@@ -1,5 +1,5 @@
 import concurrent.futures
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 import copy
 from dataclasses import dataclass
 import os
@@ -125,8 +125,7 @@ class SGDPruner(Pruner):
         self.causal_weights_trainers = dict()
         self.multiprocess_checkpoint_writer = config.multiprocess_checkpoint_writer
         if self.multiprocess_checkpoint_writer:
-            self.checkpointer = ProcessPoolExecutor(
-                max_workers=min(psutil.cpu_count() - 2, 6))
+            self.checkpointer = ThreadPoolExecutor()
             self.checkpoint_futures = []
         for param_name in self.params:
             trainer_config_copy = copy.deepcopy(self.trainer_config)
