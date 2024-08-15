@@ -10,6 +10,7 @@ sys.path.insert(
 import argparse
 import shutil
 
+import torch
 import torch.nn as nn
 import torch.optim as optim
 
@@ -310,5 +311,6 @@ def parse_args() -> argparse.Namespace:
 
 
 if __name__ == '__main__':
+    torch.multiprocessing.set_start_method('spawn')
     args = parse_args()
     main(args)

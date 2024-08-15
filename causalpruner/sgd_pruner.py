@@ -34,16 +34,6 @@ class ParamDataset(Dataset):
                              len(os.listdir(self.loss_base_dir)))
 
     @torch.no_grad
-    def preload_data(self):
-        params_list, loss_list = [], []
-        for index in range(len(self)):
-            param, loss = self.get_item(index)
-            params_list.append(param)
-            loss_list.append(loss)
-        self.preloaded_params = torch.stack(params_list)
-        self.preloaded_losses = torch.stack(loss_list)
-
-    @torch.no_grad
     def __len__(self) -> int:
         return self.num_items - 2 if self.momentum else self.num_items - 1
 
