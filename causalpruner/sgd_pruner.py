@@ -26,16 +26,12 @@ class ParamDataset(Dataset):
             self,
             param_base_dir: str,
             loss_base_dir: str,
-            momentum: bool,
-            preload: bool = True):
+            momentum: bool):
         self.param_base_dir = param_base_dir
         self.loss_base_dir = loss_base_dir
         self.momentum = momentum
         self.num_items = min(len(os.listdir(self.param_base_dir)),
                              len(os.listdir(self.loss_base_dir)))
-        self.preload = preload
-        if preload:
-            self.preload_data()
 
     @torch.no_grad
     def preload_data(self):
@@ -53,15 +49,6 @@ class ParamDataset(Dataset):
 
     @torch.no_grad
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        if self.preload:
-            param = self.preloaded_params[idx]
-            loss = self.preloaded_losses[idx]
-        else:
-            param, loss = self.get_item(idx)
-        return (param, loss)
-
-    @torch.no_grad
-    def get_item(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
         delta_param = self.get_delta_param(idx)
         delta_loss = self.get_delta_loss(idx)
         return delta_param, delta_loss
@@ -108,7 +95,6 @@ class ParamDataset(Dataset):
 
 @dataclass
 class SGDPrunerConfig(PrunerConfig):
-    preload: bool
     batch_size: int
     num_dataloader_workers: int
     multiprocess_checkpoint_writer: bool
@@ -172,23 +158,21 @@ class SGDPruner(Pruner):
         params = self.param_checkpoint_dirs.items()
         if self.multiprocess_checkpoint_writer:
             concurrent.futures.wait(self.checkpoint_futures)
+            del self.checkpoint_futures
             self.checkpoint_futures = []
         pbar_pruning = tqdm(total=len(params), leave=False)
         for param, param_dir in params:
             pbar_pruning.set_description(param)
             pbar_pruning.update(1)
             self._train_pruning_weights_for_param(param, param_dir)
-        self._delete_checkpoint_dirs()
+            self._delete_checkpoint_dir(param_dir)
+        self._delete_checkpoint_dir(self.loss_checkpoint_dir)
 
-    def _delete_checkpoint_dirs(self):
+    def _delete_checkpoint_dir(self, dirpath: str):
         if not self.config.delete_checkpoint_dir_after_training:
             return
-        loss_dir = os.path.join(
-            self.loss_checkpoint_dir, f'{self.iteration}')
-        shutil.rmtree(loss_dir)
-        for param_dir in self.param_checkpoint_dirs.values():
-            param_dir = os.path.join(param_dir, f'{self.iteration}')
-            shutil.rmtree(param_dir)
+        dirpath = os.path.join(dirpath, f'{self.iteration}')
+        shutil.rmtree(dirpath)
 
     @torch.no_grad
     def get_mask(self, name: str) -> torch.Tensor:
@@ -210,8 +194,7 @@ class SGDPruner(Pruner):
         param_dir = os.path.join(param_dir, f'{self.iteration}')
         loss_dir = os.path.join(self.loss_checkpoint_dir, f'{self.iteration}')
         dataset = ParamDataset(param_dir, loss_dir,
-                               self.trainer_config.momentum,
-                               preload=self.config.preload)
+                               self.trainer_config.momentum)
         trainer = self.causal_weights_trainers[param]
         trainer.reset()
         batch_size = self.config.batch_size

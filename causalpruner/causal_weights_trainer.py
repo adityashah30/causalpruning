@@ -110,6 +110,9 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
         self.optimizer = LassoSGD(
             self.layer.parameters(),
             init_lr=self.init_lr, alpha=self.l1_regularization_coeff)
+        
+    def supports_batch_training(self) -> bool:
+        return True
 
     @torch.no_grad
     def reset(self):
