@@ -121,7 +121,7 @@ def main(args: argparse.Namespace):
     device = best_device(args.device_id)
 
     train_dataset, test_dataset, _ = get_dataset(
-        dataset_name, model_name, root_dir=dataset_root_dir)
+        dataset_name, model_name, data_root_dir=dataset_root_dir)
     testloader = DataLoader(
         test_dataset, batch_size=args.batch_size,
         shuffle=args.shuffle, pin_memory=True,
@@ -162,7 +162,8 @@ def parse_args() -> argparse.Namespace:
                         choices=['lenet', 'alexnet', 'resnet18', 'resnet50'],
                         help='Model name')
     parser.add_argument('--dataset', type=str,
-                        choices=['cifar10', 'fashionmnist', 'imagenet'],
+                        choices=['cifar10', 'fashionmnist', 'imagenet',
+                        'tinyimagenet'],
                         help='Dataset name')
     parser.add_argument('--model_checkpoint',
                         type=str, default='',
