@@ -13,7 +13,7 @@ import torch.nn.utils.prune as prune
 from torch.utils.data import Dataset, DataLoader
 from tqdm.auto import tqdm
 
-from causalpruner.base import Pruner, PrunerConfig, best_device
+from causalpruner.base import Pruner, PrunerConfig
 from causalpruner.causal_weights_trainer import (
     CausalWeightsTrainerConfig,
     get_causal_weights_trainer,
@@ -118,6 +118,8 @@ class SGDPruner(Pruner):
 
     @torch.no_grad
     def provide_loss(self, loss: float) -> None:
+        if self.fabric.global_rank != 0:
+            return
         self.write_tensor(torch.tensor(
             loss), self._get_checkpoint_path('loss'))
         for param in self.params:
@@ -145,18 +147,24 @@ class SGDPruner(Pruner):
             prune.custom_from_mask(module, 'weight', mask)
 
     def train_pruning_weights(self) -> None:
-        params = self.param_checkpoint_dirs.items()
         if self.multiprocess_checkpoint_writer:
             concurrent.futures.wait(self.checkpoint_futures)
             del self.checkpoint_futures
             self.checkpoint_futures = []
-        pbar_pruning = tqdm(total=len(params), leave=False)
-        for param, param_dir in params:
+        num_params = len(self.params)
+        pbar_pruning = tqdm(total=num_params, leave=False)
+        world_size = self.fabric.world_size
+        global_rank = self.fabric.global_rank
+        for param_idx in range(global_rank, num_params, world_size):
+            param = self.params[param_idx]
+            param_dir = self.param_checkpoint_dirs[param]
             pbar_pruning.set_description(param)
             pbar_pruning.update(1)
             self._train_pruning_weights_for_param(param, param_dir)
             self._delete_checkpoint_dir(param_dir)
-        self._delete_checkpoint_dir(self.loss_checkpoint_dir)
+        self.fabric.barrier()
+        if self.fabric.global_rank == 0:
+            self._delete_checkpoint_dir(self.loss_checkpoint_dir)
 
     def _delete_checkpoint_dir(self, dirpath: str):
         if not self.config.delete_checkpoint_dir_after_training:
@@ -168,6 +176,7 @@ class SGDPruner(Pruner):
     def get_mask(self, name: str) -> torch.Tensor:
         trainer = self.causal_weights_trainers[name]
         mask = trainer.get_non_zero_weights()
+        mask = self.fabric.all_reduce(mask, reduce_op='sum')
         mask = mask.reshape_as(self.modules_dict[name].weight)
         return mask
 

@@ -1,30 +1,25 @@
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from dataclasses import dataclass
 import os
 import shutil
 from typing import Union
 
+from lightning.fabric import Fabric
 import torch
 import torch.nn as nn
 import torch.nn.utils.prune as prune
 
 
-def best_device(identifier: Union[None, int] = None) -> torch.device:
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    if identifier is not None:
-        device = f'{device}:{identifier}'
-    return torch.device(device)
-
-
 @dataclass
 class PrunerConfig:
     pruner: str
+    fabric: Fabric
     model: nn.Module
     checkpoint_dir: str
     start_clean: bool
     eval_after_epoch: bool
     reset_weights: bool
-    device: Union[str, torch.device]
 
 
 class Pruner(ABC):
@@ -34,6 +29,10 @@ class Pruner(ABC):
         nn.Conv1d,
         nn.Conv2d,
         nn.Conv3d,
+    ]
+
+    _PREFIXES_TO_CONSUME = [
+        '_forward_module.'
     ]
 
     @staticmethod
@@ -53,11 +52,15 @@ class Pruner(ABC):
     def __init__(self, config: PrunerConfig):
         super().__init__()
         self.config = config
-        self.device = config.device
+        self.fabric = config.fabric
+        self.device = self.fabric.device
         self.iteration = -1
 
         self.modules_dict = dict()
         for name, module in self.config.model.named_modules():
+            for prefix in self._PREFIXES_TO_CONSUME:
+                if name.startswith(prefix):
+                    name = name.removeprefix(prefix)
             if self.is_module_supported(module):
                 self.modules_dict[name] = module
 
@@ -65,22 +68,25 @@ class Pruner(ABC):
         for module_name, module in self.modules_dict.items():
             if hasattr(module, 'weight'):
                 self.params.append(module_name)
+        self.params = sorted(self.params)
 
         self.checkpoint_dir = config.checkpoint_dir
-        if config.start_clean and os.path.exists(self.checkpoint_dir):
-            shutil.rmtree(self.checkpoint_dir)
-        os.makedirs(self.checkpoint_dir, exist_ok=True)
-
         self.init_model_path = os.path.join(self.checkpoint_dir, 'init.ckpt')
         self.loss_checkpoint_dir = os.path.join(
             self.checkpoint_dir, 'loss')
-        os.makedirs(self.loss_checkpoint_dir, exist_ok=True)
         self.param_checkpoint_dirs = dict()
         for param in self.params:
             self.param_checkpoint_dirs[param] = os.path.join(
                 self.checkpoint_dir, param)
-            os.makedirs(self.param_checkpoint_dirs[param],
-                        exist_ok=True)
+
+        # Setup directories on the global_rank = 0
+        if self.fabric.global_rank == 0:
+            if config.start_clean and os.path.exists(self.checkpoint_dir):
+                shutil.rmtree(self.checkpoint_dir)
+            os.makedirs(self.checkpoint_dir, exist_ok=True)
+            os.makedirs(self.loss_checkpoint_dir, exist_ok=True)
+            for param in self.params:
+                os.makedirs(self.param_checkpoint_dirs[param], exist_ok=True)
 
     def __str__(self) -> str:
         return self.config.pruner

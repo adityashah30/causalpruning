@@ -1,7 +1,6 @@
 from .base import (
     Pruner,
     PrunerConfig,
-    best_device,
 )
 from .causal_weights_trainer import (
     CausalWeightsTrainer,
@@ -10,6 +9,6 @@ from .causal_weights_trainer import (
 )
 from .lasso_optimizer import LassoSGD
 from .sgd_pruner import (
-    SGDPruner, 
+    SGDPruner,
     SGDPrunerConfig,
 )

@@ -10,6 +10,7 @@ sys.path.insert(
 import argparse
 import shutil
 
+from lightning.fabric import Fabric
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -20,7 +21,6 @@ from causalpruner import (
     PrunerConfig,
     SGDPruner,
     SGDPrunerConfig,
-    best_device,
 )
 from models import get_model
 from datasets import get_dataset
@@ -98,12 +98,15 @@ def main(args):
     train_dataset, test_dataset, num_classes = get_dataset(
         dataset_name, model_name, args.dataset_root_dir,
         cache_size_limit_gb=args.dataset_cache_size_limit_gb)
-    device_id = args.device_id
-    model = get_model(model_name, dataset_name).to(best_device(device_id))
+    fabric = Fabric(accelerator='auto', strategy='ddp')
+    fabric.launch()
+    model = get_model(model_name, dataset_name)
     prune_optimizer = get_prune_optimizer(
         args.optimizer, model, args.lr, momentum)
     train_optimizer = get_train_optimizer(
         args.train_optimizer, model, args.train_lr, momentum)
+    model, prune_optimizer, train_optimizer = fabric.setup(
+        model, prune_optimizer, train_optimizer)
     data_config = DataConfig(
         train_dataset=train_dataset, test_dataset=test_dataset,
         batch_size=args.batch_size, num_workers=args.num_dataset_workers,
@@ -117,7 +120,10 @@ def main(args):
         grad_step_num_batches=args.grad_step_num_batches,
         tqdm_update_frequency=args.tqdm_update_frequency)
     trainer_config = TrainerConfig(
-        hparams=vars(args), model=model, prune_optimizer=prune_optimizer,
+        hparams=vars(args),
+        fabric=fabric,
+        model=model,
+        prune_optimizer=prune_optimizer,
         train_optimizer=train_optimizer,
         train_convergence_loss_tolerance=args.train_convergence_loss_tolerance,
         train_loss_num_epochs_no_change=args.train_loss_num_epochs_no_change,
@@ -126,8 +132,7 @@ def main(args):
         verbose=args.verbose,
         train_only=args.train_only,
         model_to_load_for_training=args.model_to_load_for_training,
-        model_to_save_after_training=args.model_to_save_after_training,
-        device=best_device(device_id))
+        model_to_save_after_training=args.model_to_save_after_training)
     pruner = None
     if args.prune:
         if args.pruner == 'causalpruner':
@@ -140,6 +145,7 @@ def main(args):
                 num_iter_no_change=args.causal_pruner_num_iter_no_change,
                 backend=args.causal_pruner_backend)
             pruner_config = SGDPrunerConfig(
+                fabric=fabric,
                 model=model,
                 pruner='SGDPruner',
                 checkpoint_dir=checkpoint_dir,
@@ -150,18 +156,17 @@ def main(args):
                 num_dataloader_workers=args.num_causal_pruner_dataloader_workers,
                 multiprocess_checkpoint_writer=args.causal_pruner_multiprocessing_checkpoint_writer,
                 trainer_config=causal_weights_trainer_config,
-                delete_checkpoint_dir_after_training=args.delete_checkpoint_dir_after_training,
-                device=best_device(device_id))
+                delete_checkpoint_dir_after_training=args.delete_checkpoint_dir_after_training)
         elif args.pruner == 'magpruner':
             pruner_config = MagPrunerConfig(
+                fabric=fabric,
                 model=model,
                 pruner='MagPruner',
                 checkpoint_dir=checkpoint_dir,
                 start_clean=args.start_clean,
                 eval_after_epoch = args.eval_after_epoch,
                 reset_weights=args.reset_weights_after_pruning,
-                prune_amount=args.mag_pruner_amount,
-                device=best_device(device_id))
+                prune_amount=args.mag_pruner_amount)
         pruner = get_pruner(pruner_config)
     trainer = Trainer(trainer_config, pruner)
     trainer.run()
@@ -311,6 +316,5 @@ def parse_args() -> argparse.Namespace:
 
 
 if __name__ == '__main__':
-    torch.multiprocessing.set_start_method('spawn')
     args = parse_args()
     main(args)

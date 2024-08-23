@@ -2,6 +2,7 @@ from dataclasses import dataclass
 import os
 from typing import Callable, Optional, Union
 
+from lightning.fabric import Fabric
 import numpy as np
 import torch
 import torch.nn as nn
@@ -17,7 +18,7 @@ from torcheval.metrics import (
 )
 from tqdm.auto import tqdm
 
-from causalpruner import Pruner, best_device
+from causalpruner import Pruner
 
 
 @dataclass
@@ -52,6 +53,7 @@ class EpochConfig:
 @dataclass
 class TrainerConfig:
     hparams: dict[str, str]
+    fabric: Fabric
     model: nn.Module
     prune_optimizer: optim.Optimizer
     train_optimizer: optim.Optimizer
@@ -66,7 +68,6 @@ class TrainerConfig:
     train_only: bool = False
     model_to_load_for_training: str = 'prune.final'
     model_to_save_after_training: str = 'trained'
-    device: Union[str, torch.device] = best_device()
 
 
 class AverageMeter:
@@ -105,6 +106,8 @@ class Trainer:
 
     def __init__(self, config: TrainerConfig, pruner: Optional[Pruner] = None):
         self.config = config
+        self.fabric = config.fabric
+        self.fabric.seed_everything(314159265359)
         self.pruner = pruner
         # Shortcuts for easy access
         self.data_config = config.data_config
@@ -114,7 +117,7 @@ class Trainer:
             self.total_epochs += (self.epoch_config.num_pre_prune_epochs
                                   + self.epoch_config.num_prune_iterations *
                                   self.epoch_config.num_prune_epochs)
-        self.device = config.device
+        self.device = self.fabric.device
         self.pbar = tqdm(total=self.total_epochs)
         self.global_step = -1
         self.writer = SummaryWriter(config.tensorboard_dir)
@@ -138,6 +141,8 @@ class Trainer:
             shuffle=False, pin_memory=True,
             num_workers=data_config.num_workers,
             persistent_workers=data_config.num_workers > 0)
+        self.trainloader, self.testloader = self.fabric.setup_dataloaders(
+            self.trainloader, self.testloader)
 
     def _should_prune(self) -> bool:
         return not self.config.train_only and self.pruner is not None
@@ -169,7 +174,7 @@ class Trainer:
                 labels = labels.to(self.device, non_blocking=True)
                 outputs = config.model(inputs)
                 loss = config.loss_fn(outputs, labels)
-                loss.backward()
+                self.fabric.backward(loss)
                 if batch_counter % grad_step_num_batches == 0:
                     config.train_optimizer.step()
                     config.train_optimizer.zero_grad(set_to_none=True)
@@ -217,7 +222,7 @@ class Trainer:
                 labels = labels.to(self.device, non_blocking=True)
                 outputs = config.model(inputs)
                 loss = config.loss_fn(outputs, labels)
-                loss.backward()
+                self.fabric.backward(loss)
                 grad_step_loss_avg.update(loss.item())
                 loss_avg.update(loss.item())
                 if batch_counter % grad_step_num_batches == 0:
@@ -270,7 +275,7 @@ class Trainer:
                 labels = labels.to(self.device, non_blocking=True)
                 outputs = config.model(inputs)
                 loss = config.loss_fn(outputs, labels)
-                loss.backward()
+                self.fabric.backward(loss)
                 if batch_counter % grad_step_num_batches == 0:
                     config.train_optimizer.step()
                     config.train_optimizer.zero_grad(set_to_none=True)
