@@ -98,7 +98,7 @@ def main(args):
     train_dataset, test_dataset, num_classes = get_dataset(
         dataset_name, model_name, args.dataset_root_dir,
         cache_size_limit_gb=args.dataset_cache_size_limit_gb)
-    fabric = Fabric(accelerator='auto', strategy='ddp')
+    fabric = Fabric(devices=args.device_ids, accelerator='auto', strategy='ddp')
     fabric.launch()
     model = get_model(model_name, dataset_name)
     prune_optimizer = get_prune_optimizer(
@@ -175,9 +175,9 @@ def main(args):
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Causal Pruning')
 
-    parser.add_argument('--device_id',
-                        type=int,
-                        default=0,
+    parser.add_argument('--device_ids',
+                        type=str,
+                        default="-1",
                         help='The device id. Useful for multi device systems')
     parser.add_argument('--suffix',
                         type=str, default='',
