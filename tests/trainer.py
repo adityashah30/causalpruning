@@ -386,6 +386,8 @@ class Trainer:
     def compute_prune_stats(self):
         if not self.config.verbose:
             return
+        if self.fabric.global_rank != 0:
+            return
         tqdm.write('\n======================================================\n')
         tqdm.write(f'Global Step: {self.global_step + 1}')
         all_params_total = 0
@@ -421,7 +423,7 @@ class Trainer:
 
     def _checkpoint_model(self, id: str):
         fname = os.path.join(self.config.checkpoint_dir, f'model.{id}.ckpt')
-        torch.save(self.config.model.state_dict(), fname)
+        self.fabric.save(fname, {'model': self.config.model})
 
     def _load_model(self, id: str):
         fname = os.path.join(self.config.checkpoint_dir, f'model.{id}.ckpt')
@@ -431,4 +433,4 @@ class Trainer:
         if self.pruner is not None:
             self.pruner.apply_identity_masks()
         tqdm.write(f'Model loaded from {fname}')
-        self.config.model.load_state_dict(torch.load(fname))
+        self.fabric.load(fname, {'model': self.config.model})
