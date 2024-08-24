@@ -87,6 +87,7 @@ class Pruner(ABC):
             os.makedirs(self.loss_checkpoint_dir, exist_ok=True)
             for param in self.params:
                 os.makedirs(self.param_checkpoint_dirs[param], exist_ok=True)
+        self.fabric.barrier()
 
     def __str__(self) -> str:
         return self.config.pruner
@@ -131,14 +132,16 @@ class Pruner(ABC):
     @torch.no_grad
     def start_iteration(self) -> None:
         self.iteration += 1
-        iteration_name = f'{self.iteration}'
-        loss_dir = os.path.join(self.loss_checkpoint_dir, iteration_name)
-        os.makedirs(loss_dir, exist_ok=True)
-        for param in self.params:
-            param_dir = os.path.join(
-                self.param_checkpoint_dirs[param], iteration_name)
-            os.makedirs(param_dir, exist_ok=True)
         self.counter = 0
+        if self.fabric.global_rank == 0:
+            iteration_name = f'{self.iteration}'
+            loss_dir = os.path.join(self.loss_checkpoint_dir, iteration_name)
+            os.makedirs(loss_dir, exist_ok=True)
+            for param in self.params:
+                param_dir = os.path.join(
+                    self.param_checkpoint_dirs[param], iteration_name)
+                os.makedirs(param_dir, exist_ok=True)
+        self.fabric.barrier()
 
     @torch.no_grad
     def reset_weights(self) -> None:
