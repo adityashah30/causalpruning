@@ -116,6 +116,7 @@ def main(args):
     epoch_config = EpochConfig(
         num_pre_prune_epochs=args.num_pre_prune_epochs if args.prune else 0,
         num_prune_iterations=args.num_prune_iterations if args.prune else 0,
+        num_train_epochs_before_pruning=args.num_train_epochs_before_pruning if args.prune else 0,
         num_prune_epochs=args.num_prune_epochs if args.prune else 0,
         num_train_epochs=args.max_train_epochs,
         num_batches_in_epoch=args.num_batches_in_epoch,
@@ -247,6 +248,9 @@ def parse_args() -> argparse.Namespace:
                         help='Number of epochs for pretraining')
     parser.add_argument('--num_prune_iterations', type=int, default=10,
                         help='Number of iterations to prune')
+    parser.add_argument('--num_train_epochs_before_pruning',
+                        type=int, default=0,
+                        help='Number of epochs for training before pruning in each pruning iteration')
     parser.add_argument('--num_prune_epochs', type=int, default=10,
                         help='Number of epochs for pruning')
     parser.add_argument('--num_batches_in_epoch', type=int, default=-1,

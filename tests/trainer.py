@@ -28,9 +28,28 @@ class DataConfig:
 
 @dataclass
 class EpochConfig:
+    # Number of epochs to train the model before starting pruning. This ensures
+    # that the model starts from a decent state where we can start to indentify
+    # causal relationship between loss and params. This param is not required
+    # for model with pretrained weights.
     num_pre_prune_epochs: int
+    # Number of prune iterations to run. Every prune iteration involves two
+    # steps:
+    # 1. Training -- controlled by `num_train_epochs_while_pruning`. Helps learn
+    #                new weights after the last pruning iteration.
+    # 2. Pruning -- controlled by `num_prune_epochs`. Runs training and logs
+    #               loss and param updates that are then fed to the Pruner.
     num_prune_iterations: int
+    # Number of pure training epochs before pruning. This helps train the model
+    # for longer without logging loss and param updates. This helps for large
+    # models where storing all loss and param updates might be too expensive,
+    # but we need to train the model between pruning steps to ensure good
+    # performance
+    num_train_epochs_before_pruning: int
+    # Number of training + pruning epochs. The model is trained in these epochs
+    # and the loss and param updates are stored to disk for pruning.
     num_prune_epochs: int
+    # Number of training epochs once pruning is complete.
     num_train_epochs: int
     # Number of steps to run the dataloader. Note that we run over the entire
     # dataset by default -- which will happen for any value < 0.
@@ -153,7 +172,8 @@ class Trainer:
         if not config.train_only:
             self.total_epochs += (self.epoch_config.num_pre_prune_epochs
                                   + self.epoch_config.num_prune_iterations *
-                                  self.epoch_config.num_prune_epochs)
+                                  (self.epoch_config.num_train_epochs_before_pruning
+                                   + self.epoch_config.num_prune_epochs))
         self.device = self.fabric.device
         self.pbar = tqdm(total=self.total_epochs)
         self.global_step = -1
@@ -210,8 +230,6 @@ class Trainer:
                         desc=f'Pre-prune epoch: {epoch}')
             for batch_counter, data in enumerate(pbar):
                 inputs, labels = data
-                inputs = inputs.to(self.device, non_blocking=True)
-                labels = labels.to(self.device, non_blocking=True)
                 outputs = config.model(inputs)
                 loss = config.loss_fn(outputs, labels)
                 self.fabric.backward(loss)
@@ -237,9 +255,50 @@ class Trainer:
         epoch_config = self.epoch_config
         self.pruner.start_pruning()
         for iteration in range(epoch_config.num_prune_iterations):
+            self._train_model_before_prune(iteration)
             self._run_prune_iteration(iteration)
             self._checkpoint_model(f'prune.{iteration}')
         self._checkpoint_model('prune.final')
+
+    def _train_model_before_prune(self, iteration):
+        config = self.config
+        epoch_config = self.epoch_config
+        num_batches_in_epoch = epoch_config.num_batches_in_epoch
+        grad_step_num_batches = epoch_config.grad_step_num_batches
+        tqdm_update_frequency = epoch_config.tqdm_update_frequency
+        for epoch in range(epoch_config.num_train_epochs_before_pruning):
+            self.global_step += 1
+            self.pbar.update(1)
+            config.model.train()
+            loss_avg = AverageMeter()
+            pbar = tqdm(
+                self.trainloader, leave=False,
+                desc=f'Train before pruning epoch: {epoch}')
+            for batch_counter, data in enumerate(pbar):
+                inputs, labels = data
+                outputs = config.model(inputs)
+                loss = config.loss_fn(outputs, labels)
+                self.fabric.backward(loss)
+                if batch_counter % grad_step_num_batches == 0:
+                    config.train_optimizer.step()
+                    config.train_optimizer.zero_grad(set_to_none=True)
+                loss_avg.update(loss.item())
+                if (batch_counter + 1) % tqdm_update_frequency == 0:
+                    pbar.update(tqdm_update_frequency)
+                if (num_batches_in_epoch > 0 and
+                        batch_counter >= num_batches_in_epoch):
+                    break
+            pbar.close()
+            loss = loss_avg.avg
+            self.writer.add_scalar('Loss/train', loss, self.global_step)
+            accuracy = self.eval_model()
+            iter_str = f'{iteration+1}/{epoch_config.num_prune_iterations}'
+            epoch_str = f'{epoch+1}/{epoch_config.num_train_epochs_before_pruning}'
+            self.pbar.set_description(
+                f'Train before Prune: Iteration {iter_str}; ' +
+                f'Epoch: {epoch_str}; ' +
+                f'Loss/Train: {loss_avg.avg:.4f}; ' +
+                f'Accuracy/Test: {accuracy:.4f}')
 
     def _run_prune_iteration(self, iteration):
         config = self.config
@@ -258,8 +317,6 @@ class Trainer:
                 self.trainloader, leave=False, desc=f'Prune epoch: {epoch}')
             for batch_counter, data in enumerate(pbar):
                 inputs, labels = data
-                inputs = inputs.to(self.device, non_blocking=True)
-                labels = labels.to(self.device, non_blocking=True)
                 outputs = config.model(inputs)
                 loss = config.loss_fn(outputs, labels)
                 self.fabric.backward(loss)
@@ -311,8 +368,6 @@ class Trainer:
                 self.trainloader, leave=False, desc=f'Train epoch: {epoch}')
             for batch_counter, data in enumerate(pbar):
                 inputs, labels = data
-                inputs = inputs.to(self.device, non_blocking=True)
-                labels = labels.to(self.device, non_blocking=True)
                 outputs = config.model(inputs)
                 loss = config.loss_fn(outputs, labels)
                 self.fabric.backward(loss)
@@ -357,8 +412,6 @@ class Trainer:
         self.val_accuracy.reset()
         for data in tqdm(self.testloader, leave=False, desc='Eval'):
             inputs, labels = data
-            inputs = inputs.to(self.device, non_blocking=True)
-            labels = labels.to(self.device, non_blocking=True)
             outputs = model(inputs)
             self.val_accuracy(outputs, labels)
         accuracy = self.val_accuracy.compute()
@@ -369,11 +422,10 @@ class Trainer:
     def get_all_eval_metrics(self):
         model = self.config.model
         model.eval()
-        metrics_computer = MetricsComputer(self.data_config.num_classes).to(self.device)
+        metrics_computer = MetricsComputer(
+            self.data_config.num_classes).to(self.device)
         for data in self.testloader:
             inputs, labels = data
-            inputs = inputs.to(self.device, non_blocking=True)
-            labels = labels.to(self.device, non_blocking=True)
             outputs = model(inputs)
             metrics_computer.add(outputs, labels)
         eval_metrics = metrics_computer.compute()
