@@ -107,9 +107,11 @@ def main(args):
         args.train_optimizer, model, args.train_lr, momentum)
     model, prune_optimizer, train_optimizer = fabric.setup(
         model, prune_optimizer, train_optimizer)
+    world_size = fabric.world_size
+    batch_size = args.batch_size // world_size
     data_config = DataConfig(
         train_dataset=train_dataset, test_dataset=test_dataset,
-        batch_size=args.batch_size, num_workers=args.num_dataset_workers,
+        batch_size=batch_size, num_workers=args.num_dataset_workers,
         shuffle=args.shuffle_dataset, num_classes=num_classes)
     epoch_config = EpochConfig(
         num_pre_prune_epochs=args.num_pre_prune_epochs if args.prune else 0,
