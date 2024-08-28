@@ -103,13 +103,16 @@ class SGDPruner(Pruner):
         if self.multiprocess_checkpoint_writer:
             self.checkpointer = ThreadPoolExecutor()
             self.checkpoint_futures = []
-        for param_name in self.params:
+        world_size = self.fabric.world_size
+        self.param_to_rank = dict()
+        for idx, param_name in enumerate(self.params):
             trainer_config_copy = copy.deepcopy(self.trainer_config)
             trainer_config_copy.param_name = param_name
             module = self.modules_dict[param_name]
             trainer = get_causal_weights_trainer(
                 trainer_config_copy, self.device, module.weight)
             self.causal_weights_trainers[param_name] = trainer
+            self.param_to_rank[param_name] = idx % world_size
 
     @torch.no_grad
     def start_iteration(self):
@@ -176,7 +179,8 @@ class SGDPruner(Pruner):
     def get_mask(self, name: str) -> torch.Tensor:
         trainer = self.causal_weights_trainers[name]
         mask = trainer.get_non_zero_weights()
-        mask = self.fabric.all_reduce(mask, reduce_op='sum')
+        mask = self.fabric.broadcast(
+            mask, src=self.param_to_rank[name]).to(self.device)
         mask = mask.reshape_as(self.modules_dict[name].weight)
         return mask
 

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import os
-from typing import Callable, Optional, Union
+from typing import Callable, Optional
 
 from lightning.fabric import Fabric
 import numpy as np
@@ -10,12 +10,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.tensorboard import SummaryWriter
-from torcheval.metrics import (
-    MulticlassAccuracy,
-    MulticlassPrecision,
-    MulticlassRecall,
-    MulticlassF1Score,
-)
+import torchmetrics
 from tqdm.auto import tqdm
 
 from causalpruner import Pruner
@@ -102,12 +97,54 @@ def write_scalars(
         writer.add_scalar(f'{tag}/class_{idx}',  value, global_step)
 
 
+class MetricsComputer:
+
+    def __init__(self, num_classes: int):
+        self.num_classes = num_classes
+        self.accuracy = torchmetrics.Accuracy(
+            task='multiclass', num_classes=num_classes, average='none')
+        self.precision = torchmetrics.Precision(
+            task='multiclass', num_classes=num_classes, average='none')
+        self.recall = torchmetrics.Recall(
+            task='multiclass', num_classes=num_classes, average='none')
+        self.f1_score = torchmetrics.F1Score(
+            task='multiclass', num_classes=num_classes, average='none')
+
+    def to(self, device: torch.device) -> 'MetricsComputer':
+        self.accuracy.to(device)
+        self.precision.to(device)
+        self.recall.to(device)
+        self.f1_score.to(device)
+        return self
+
+    def reset(self) -> 'MetricsComputer':
+        self.accuracy.reset()
+        self.precision.reset()
+        self.recall.reset()
+        self.f1_score.reset()
+        return self
+
+    def add(self, logits: torch.Tensor, labels: torch.Tensor):
+        self.accuracy(logits, labels)
+        self.precision(logits, labels)
+        self.recall(logits, labels)
+        self.f1_score(logits, labels)
+
+    def compute(self) -> EvalMetrics:
+        return EvalMetrics(
+            accuracy=self.accuracy.compute(),
+            precision=self.precision.compute(),
+            recall=self.recall.compute(),
+            f1_score=self.f1_score.compute()
+        )
+
+
 class Trainer:
 
     def __init__(self, config: TrainerConfig, pruner: Optional[Pruner] = None):
         self.config = config
         self.fabric = config.fabric
-        self.fabric.seed_everything(314159265359)
+        self.fabric.seed_everything(314159)
         self.pruner = pruner
         # Shortcuts for easy access
         self.data_config = config.data_config
@@ -124,6 +161,9 @@ class Trainer:
         self.writer.add_hparams(config.hparams, {})
         self._make_dataloaders()
         os.makedirs(config.checkpoint_dir, exist_ok=True)
+        self.val_accuracy = torchmetrics.Accuracy(
+            task='multiclass', num_classes=self.data_config.num_classes).to(
+            self.device)
 
     def __del__(self):
         self.pbar.close()
@@ -166,8 +206,8 @@ class Trainer:
             self.pbar.update(1)
             config.model.train()
             loss_avg = AverageMeter()
-            pbar = tqdm(
-                self.trainloader, leave=False, desc=f'Pre-prune epoch: {epoch}')
+            pbar = tqdm(self.trainloader, leave=False,
+                        desc=f'Pre-prune epoch: {epoch}')
             for batch_counter, data in enumerate(pbar):
                 inputs, labels = data
                 inputs = inputs.to(self.device, non_blocking=True)
@@ -314,14 +354,14 @@ class Trainer:
     def eval_model(self) -> float:
         model = self.config.model
         model.eval()
-        accuracy = MulticlassAccuracy().to(self.device)
+        self.val_accuracy.reset()
         for data in tqdm(self.testloader, leave=False, desc='Eval'):
             inputs, labels = data
             inputs = inputs.to(self.device, non_blocking=True)
             labels = labels.to(self.device, non_blocking=True)
             outputs = model(inputs)
-            accuracy.update(outputs, labels)
-        accuracy = accuracy.compute().item()
+            self.val_accuracy(outputs, labels)
+        accuracy = self.val_accuracy.compute()
         self.writer.add_scalar('Accuracy/Test', accuracy, self.global_step)
         return accuracy
 
@@ -329,32 +369,14 @@ class Trainer:
     def get_all_eval_metrics(self):
         model = self.config.model
         model.eval()
-        accuracy = MulticlassAccuracy(
-            num_classes=self.data_config.num_classes,
-            average=None).to(self.device)
-        precision = MulticlassPrecision(
-            num_classes=self.data_config.num_classes,
-            average=None).to(self.device)
-        recall = MulticlassRecall(
-            num_classes=self.data_config.num_classes,
-            average=None).to(self.device)
-        f1_score = MulticlassF1Score(
-            num_classes=self.data_config.num_classes,
-            average=None).to(self.device)
+        metrics_computer = MetricsComputer(self.data_config.num_classes).to(self.device)
         for data in self.testloader:
             inputs, labels = data
             inputs = inputs.to(self.device, non_blocking=True)
             labels = labels.to(self.device, non_blocking=True)
             outputs = model(inputs)
-            accuracy.update(outputs, labels)
-            precision.update(outputs, labels)
-            recall.update(outputs, labels)
-            f1_score.update(outputs, labels)
-        eval_metrics = EvalMetrics(
-            accuracy=accuracy.compute(),
-            precision=precision.compute(),
-            recall=recall.compute(),
-            f1_score=f1_score.compute())
+            metrics_computer.add(outputs, labels)
+        eval_metrics = metrics_computer.compute()
         self._print_eval_metrics(eval_metrics)
 
     def _print_eval_metrics(self, eval_metrics: EvalMetrics):
