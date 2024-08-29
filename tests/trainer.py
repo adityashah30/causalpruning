@@ -178,6 +178,9 @@ class Trainer:
         self.val_accuracy = torchmetrics.Accuracy(
             task='multiclass', num_classes=self.data_config.num_classes).to(
             self.device)
+        self.metrics_computer = MetricsComputer(
+            self.data_config.num_classes).to(
+            self.device)
 
     def __del__(self):
         self.pbar.close()
@@ -429,20 +432,18 @@ class Trainer:
 
     @torch.no_grad
     def get_all_eval_metrics(self):
-        if not self.fabric.is_global_zero:
-            return
         model = self.config.model
         model.eval()
-        metrics_computer = MetricsComputer(
-            self.data_config.num_classes).to(self.device)
-        for data in self.testloader:
+        for data in tqdm(self.testloader, leave=False, desc='Eval Stats'):
             inputs, labels = data
             outputs = model(inputs)
-            metrics_computer.add(outputs, labels)
-        eval_metrics = metrics_computer.compute()
+            self.metrics_computer.add(outputs, labels)
+        eval_metrics = self.metrics_computer.compute()
         self._print_eval_metrics(eval_metrics)
 
     def _print_eval_metrics(self, eval_metrics: EvalMetrics):
+        if not self.fabric.is_global_zero:
+            return
         tqdm.write('\n======================================================\n')
         tqdm.write('Final eval metrics:')
         tqdm.write(f'Accuracy: {eval_metrics.accuracy}')
