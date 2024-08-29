@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import os
-from typing import Callable, Optional
+from typing import Callable, Optional, Union
 
 from lightning.fabric import Fabric
 import numpy as np
@@ -110,12 +110,6 @@ class EvalMetrics:
     f1_score: torch.Tensor
 
 
-def write_scalars(
-        writer: SummaryWriter, tag: str, val: torch.Tensor, global_step: int):
-    for idx, value in enumerate(val):
-        writer.add_scalar(f'{tag}/class_{idx}',  value, global_step)
-
-
 class MetricsComputer:
 
     def __init__(self, num_classes: int):
@@ -189,6 +183,19 @@ class Trainer:
         self.pbar.close()
         self.writer.close()
 
+    def add_scalar(
+            self, name: str, scalar: Union[float, torch.Tensor],
+            step: int):
+        if not self.fabric.is_global_zero:
+            return
+        self.writer.add_scalar(name, scalar, step)
+
+    def add_scalars(self, name: str, val: torch.Tensor, step: int):
+        if not self.fabric.is_global_zero:
+            return
+        for idx, value in enumerate(val):
+            self.writer.add_scalar(f'{name}/class_{idx}', value, step)
+
     def _make_dataloaders(self):
         data_config = self.data_config
         self.trainloader = DataLoader(
@@ -243,7 +250,7 @@ class Trainer:
                         batch_counter >= num_batches_in_epoch):
                     break
             pbar.close()
-            self.writer.add_scalar(
+            self.add_scalar(
                 'Loss/train', loss_avg.avg, self.global_step)
             accuracy = self.eval_model()
             self.pbar.set_description(
@@ -290,10 +297,11 @@ class Trainer:
                     break
             pbar.close()
             loss = loss_avg.avg
-            self.writer.add_scalar('Loss/train', loss, self.global_step)
+            self.add_scalar('Loss/train', loss, self.global_step)
             accuracy = self.eval_model()
             iter_str = f'{iteration+1}/{epoch_config.num_prune_iterations}'
-            epoch_str = f'{epoch+1}/{epoch_config.num_train_epochs_before_pruning}'
+            epoch_str = f'{
+                epoch+1}/{epoch_config.num_train_epochs_before_pruning}'
             self.pbar.set_description(
                 f'Train before Prune: Iteration {iter_str}; ' +
                 f'Epoch: {epoch_str}; ' +
@@ -333,7 +341,7 @@ class Trainer:
                         batch_counter >= num_batches_in_epoch):
                     break
             pbar.close()
-            self.writer.add_scalar(
+            self.add_scalar(
                 'Loss/train', loss_avg.avg, self.global_step)
             accuracy = np.nan
             if self.pruner.config.eval_after_epoch:
@@ -374,6 +382,7 @@ class Trainer:
                 if batch_counter % grad_step_num_batches == 0:
                     config.train_optimizer.step()
                     config.train_optimizer.zero_grad(set_to_none=True)
+                loss = self.fabric.all_reduce(loss, reduce_op='sum')
                 loss_avg.update(loss.item())
                 if (batch_counter + 1) % tqdm_update_frequency == 0:
                     pbar.update(tqdm_update_frequency)
@@ -382,7 +391,7 @@ class Trainer:
                     break
             pbar.close()
             loss = loss_avg.avg
-            self.writer.add_scalar('Loss/train', loss, self.global_step)
+            self.add_scalar('Loss/train', loss, self.global_step)
             accuracy = self.eval_model()
             if accuracy > best_accuracy:
                 best_accuracy = accuracy
@@ -415,11 +424,13 @@ class Trainer:
             outputs = model(inputs)
             self.val_accuracy(outputs, labels)
         accuracy = self.val_accuracy.compute()
-        self.writer.add_scalar('Accuracy/Test', accuracy, self.global_step)
+        self.add_scalar('Accuracy/Test', accuracy, self.global_step)
         return accuracy
 
     @torch.no_grad
     def get_all_eval_metrics(self):
+        if not self.fabric.is_global_zero:
+            return
         model = self.config.model
         model.eval()
         metrics_computer = MetricsComputer(
@@ -439,22 +450,22 @@ class Trainer:
         tqdm.write(f'Recall: {eval_metrics.recall}')
         tqdm.write(f'F1 Score: {eval_metrics.f1_score}')
         tqdm.write('\n======================================================\n')
-        write_scalars(self.writer,
-                      "Final/Accuracy",
-                      eval_metrics.accuracy,
-                      self.global_step)
-        write_scalars(self.writer,
-                      "Final/Precision",
-                      eval_metrics.precision,
-                      self.global_step)
-        write_scalars(self.writer,
-                      "Final/Recall",
-                      eval_metrics.recall,
-                      self.global_step)
-        write_scalars(self.writer,
-                      "Final/F1Score",
-                      eval_metrics.f1_score,
-                      self.global_step)
+        self.add_scalars(
+            "Final/Accuracy",
+            eval_metrics.accuracy,
+            self.global_step)
+        self.add_scalars(
+            "Final/Precision",
+            eval_metrics.precision,
+            self.global_step)
+        self.add_scalars(
+            "Final/Recall",
+            eval_metrics.recall,
+            self.global_step)
+        self.add_scalars(
+            "Final/F1Score",
+            eval_metrics.f1_score,
+            self.global_step)
 
     @torch.no_grad
     def compute_prune_stats(self):
@@ -479,8 +490,8 @@ class Trainer:
             tqdm.write(f'Name: {name}; Total: {total}; '
                        f'non-zero: {non_zero}; pruned: {pruned}; '
                        f'percent: {percent:.2f}%')
-            self.writer.add_scalar(f'{name}/pruned', pruned, self.global_step)
-            self.writer.add_scalar(
+            self.add_scalar(f'{name}/pruned', pruned, self.global_step)
+            self.add_scalar(
                 f'{name}/pruned_percent', percent, self.global_step)
         all_params_non_zero = all_params_total - all_params_pruned
         all_params_percent = 100 * all_params_pruned / \
@@ -489,9 +500,9 @@ class Trainer:
                    f'non-zero: {all_params_non_zero}; ' +
                    f'pruned: {all_params_pruned}; '
                    f'percent: {all_params_percent:.2f}%')
-        self.writer.add_scalar(
+        self.add_scalar(
             f'all/pruned', all_params_pruned, self.global_step)
-        self.writer.add_scalar(
+        self.add_scalar(
             f'all/pruned_percent', all_params_percent, self.global_step)
         tqdm.write('\n======================================================\n')
 
