@@ -303,8 +303,8 @@ class Trainer:
             self.add_scalar('Loss/train', loss, self.global_step)
             accuracy = self.eval_model()
             iter_str = f'{iteration+1}/{epoch_config.num_prune_iterations}'
-            epoch_str = f'{
-                epoch+1}/{epoch_config.num_train_epochs_before_pruning}'
+            epoch_str = (f'{epoch+1}/' +
+                         f'{epoch_config.num_train_epochs_before_pruning}')
             self.pbar.set_description(
                 f'Train before Prune: Iteration {iter_str}; ' +
                 f'Epoch: {epoch_str}; ' +
@@ -392,11 +392,11 @@ class Trainer:
                         batch_counter >= num_batches_in_epoch):
                     break
             pbar.close()
-            total_loss = [loss_avg.sum]
+            total_loss = torch.tensor([loss_avg.sum])
             total_loss = self.fabric.all_reduce(total_loss, reduce_op='sum')
-            num_loss = [loss_avg.count]
+            num_loss = torch.tensor([loss_avg.count])
             num_loss = self.fabric.all_reduce(num_loss, reduce_op='sum')
-            loss = total_loss / num_loss
+            loss = total_loss.item() / num_loss.item()
             self.add_scalar('Loss/train', loss, self.global_step)
             accuracy = self.eval_model()
             if accuracy > best_accuracy:
