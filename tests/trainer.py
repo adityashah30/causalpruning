@@ -385,7 +385,6 @@ class Trainer:
                 if batch_counter % grad_step_num_batches == 0:
                     config.train_optimizer.step()
                     config.train_optimizer.zero_grad(set_to_none=True)
-                loss = self.fabric.all_reduce(loss, reduce_op='sum')
                 loss_avg.update(loss.item())
                 if (batch_counter + 1) % tqdm_update_frequency == 0:
                     pbar.update(tqdm_update_frequency)
@@ -393,7 +392,11 @@ class Trainer:
                         batch_counter >= num_batches_in_epoch):
                     break
             pbar.close()
-            loss = loss_avg.avg
+            total_loss = [loss_avg.sum]
+            total_loss = self.fabric.all_reduce(total_loss, reduce_op='sum')
+            num_loss = [loss_avg.count]
+            num_loss = self.fabric.all_reduce(num_loss, reduce_op='sum')
+            loss = total_loss / num_loss
             self.add_scalar('Loss/train', loss, self.global_step)
             accuracy = self.eval_model()
             if accuracy > best_accuracy:

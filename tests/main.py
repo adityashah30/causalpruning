@@ -78,7 +78,9 @@ def main(args):
     dataset_name = args.dataset
     prune_identifier = pruner if prune else 'noprune'
     if prune_identifier == 'causalpruner':
-        iteration_id = f'{args.num_prune_iterations}_{args.num_prune_epochs}'
+        iteration_id = (f'{args.num_prune_iterations}_' +
+                        f'{args.num_train_epochs_before_pruning}_' +
+                        f'{args.num_prune_epochs}')
         alpha_id = f'{args.causal_pruner_l1_regularization_coeff}'
         prune_identifier += f'_{iteration_id}_{alpha_id}'
     elif prune_identifier == 'magpruner':
