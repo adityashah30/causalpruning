@@ -189,7 +189,7 @@ def parse_args() -> argparse.Namespace:
                         help='Suffix to be used for identifier. Not used if empty -- else adds `_{suffix}` to the identifier.')
     # Model args
     parser.add_argument('--model', type=str,
-                        choices=['alexnet', 'lenet', 'resnet18', 'resnet50'],
+                        choices=['alexnet', 'lenet', 'resnet18', 'resnet50', 'resnet50_untrained'],
                         default='lenet', help='Model name')
     parser.add_argument('--train_convergence_loss_tolerance', type=float,
                         default=1e-4,

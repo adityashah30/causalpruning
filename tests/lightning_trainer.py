@@ -125,7 +125,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Plot pruning graphs')
 
     parser.add_argument('--model', type=str,
-                        choices=['lenet', 'alexnet', 'resnet18', 'resnet50'],
+                        choices=['lenet', 'alexnet', 'resnet18', 'resnet50', 'resnet50_untrained'],
                         help='Model name')
     parser.add_argument('--dataset', type=str,
                         choices=['cifar10', 'fashionmnist', 'imagenet'],

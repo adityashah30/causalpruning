@@ -11,7 +11,7 @@ def get_imagenet(
         data_root_dir: str) -> tuple[data.Dataset, data.Dataset]:
     model_name = model_name.lower()
     imagenet_root = os.path.join(data_root_dir, 'imagenet')
-    if model_name == 'resnet50':
+    if model_name in ['resnet50', 'resnet50_untrained']:
         default_transforms = [
             v2.ToImage(),
             v2.ToDtype(torch.float32, scale=True),
@@ -29,4 +29,4 @@ def get_imagenet(
         test = ImageNet(root=imagenet_root, split='val',
                         transform=test_transforms)
         return (train, test)
-    raise NotImplementedError(f'CIFAR10 not available for {model_name}')
+    raise NotImplementedError(f'Imagenet not available for {model_name}')

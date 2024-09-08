@@ -118,6 +118,14 @@ def get_resnet18(dataset: str) -> nn.Module:
 def get_resnet50(dataset: str) -> nn.Module:
     dataset = dataset.lower()
     if dataset == 'imagenet':
-        model = resnet50(ResNet50_Weights.IMAGENET1K_V2)
+        model = resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
         return model
     raise NotImplementedError(f'Resnet50 is not available for {dataset}')
+
+def get_resnet50_untrained(dataset: str) -> nn.Module:
+    dataset = dataset.lower()
+    if dataset == 'imagenet':
+        model = resnet50()
+        model = initialize_model_weights(model)
+        return model
+    raise NotImplementedError(f'Resnet50 (untrained) is not available for {dataset}')
