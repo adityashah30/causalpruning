@@ -10,13 +10,10 @@ pruning.
 
 ## Setup
 
-First setup the conda environment using `environment.yml` as follows.
-
-`conda create -f environment.yml`
-
-Next, activate the environment using
-
-`conda activate cpn`
+We use `uv` package manager to handle dependency installs. Please make sure
+you have installed `uv` on your system. Please see
+https://github.com/astral-sh/uv?tab=readme-ov-file#installation for more
+details.
 
 Now, make sure to download the datasets by running `setup.sh`. 
 `setup.sh` does two things -- it untars `data/tinyimagenet200.tar.gz`, and it downloads
@@ -42,3 +39,4 @@ Run
 * `tests/lenet.sh` for all `LeNet` experiments
 * `tests/alexnet.sh` for all `AlexNet` experiments
 * `tests/resnet.sh` for all `ResNet18` experiments
+
