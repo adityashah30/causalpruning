@@ -37,6 +37,9 @@ from trainer import (
 )
 
 
+torch.set_float32_matmul_precision('medium')
+
+
 def delete_dir_if_exists(dir: str):
     if os.path.exists(dir):
         shutil.rmtree(dir)
