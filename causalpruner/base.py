@@ -1,9 +1,7 @@
 from abc import ABC, abstractmethod
-from collections import OrderedDict
 from dataclasses import dataclass
 import os
 import shutil
-from typing import Union
 
 from lightning.fabric import Fabric
 import torch
@@ -74,19 +72,16 @@ class Pruner(ABC):
         self.init_model_path = os.path.join(self.checkpoint_dir, 'init.ckpt')
         self.loss_checkpoint_dir = os.path.join(
             self.checkpoint_dir, 'loss')
-        self.param_checkpoint_dirs = dict()
-        for param in self.params:
-            self.param_checkpoint_dirs[param] = os.path.join(
-                self.checkpoint_dir, param)
+        self.weights_checkpoint_dir = os.path.join(
+            self.checkpoint_dir, 'weights')
 
         # Setup directories on the global_rank = 0
-        if self.fabric.global_rank == 0:
+        if self.fabric.is_global_zero:
             if config.start_clean and os.path.exists(self.checkpoint_dir):
                 shutil.rmtree(self.checkpoint_dir)
             os.makedirs(self.checkpoint_dir, exist_ok=True)
             os.makedirs(self.loss_checkpoint_dir, exist_ok=True)
-            for param in self.params:
-                os.makedirs(self.param_checkpoint_dirs[param], exist_ok=True)
+            os.makedirs(self.weights_checkpoint_dir, exist_ok=True)
         self.fabric.barrier()
 
     def __str__(self) -> str:
@@ -100,19 +95,19 @@ class Pruner(ABC):
         raise NotImplementedError(
             "Pruner is an abstract class. Use an appropriate derived class.")
 
-    @torch.no_grad
+    @torch.no_grad()
     def apply_masks(self) -> None:
         for param in self.params:
             module = self.modules_dict[param]
             prune.remove(module, 'weight')
 
-    @torch.no_grad
+    @torch.no_grad()
     def apply_identity_masks(self) -> None:
         for param in self.params:
             module = self.modules_dict[param]
             prune.identity(module, 'weight')
 
-    @torch.no_grad
+    @torch.no_grad()
     def remove_masks(self) -> None:
         for _, module in self.modules_dict.items():
             setattr(module, 'weight', module.weight_orig)
@@ -125,25 +120,23 @@ class Pruner(ABC):
     def provide_loss(self, loss: float) -> None:
         pass
 
-    @torch.no_grad
+    @torch.no_grad()
     def start_pruning(self) -> None:
         torch.save(self.config.model.state_dict(), self.init_model_path)
 
-    @torch.no_grad
+    @torch.no_grad()
     def start_iteration(self) -> None:
         self.iteration += 1
         self.counter = 0
-        if self.fabric.global_rank == 0:
+        if self.fabric.is_global_zero:
             iteration_name = f'{self.iteration}'
             loss_dir = os.path.join(self.loss_checkpoint_dir, iteration_name)
             os.makedirs(loss_dir, exist_ok=True)
-            for param in self.params:
-                param_dir = os.path.join(
-                    self.param_checkpoint_dirs[param], iteration_name)
-                os.makedirs(param_dir, exist_ok=True)
+            weights_dir = os.path.join(self.weights_checkpoint_dir, iteration_name)
+            os.makedirs(weights_dir, exist_ok=True)
         self.fabric.barrier()
 
-    @torch.no_grad
+    @torch.no_grad()
     def reset_weights(self) -> None:
         self.config.model.zero_grad(set_to_none=True)
         if not self.config.reset_weights:

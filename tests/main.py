@@ -103,7 +103,7 @@ def main(args):
     train_dataset, test_dataset, num_classes = get_dataset(
         dataset_name, model_name, args.dataset_root_dir,
         cache_size_limit_gb=args.dataset_cache_size_limit_gb)
-    fabric = Fabric(devices=args.device_ids, accelerator='auto', strategy='ddp')
+    fabric = Fabric(devices=args.device_ids, accelerator='auto')
     fabric.launch()
     model = get_model(model_name, dataset_name)
     prune_optimizer = get_prune_optimizer(
@@ -145,6 +145,7 @@ def main(args):
     if args.prune:
         if args.pruner == 'causalpruner':
             causal_weights_trainer_config = CausalWeightsTrainerConfig(
+                fabric=fabric,
                 init_lr=args.causal_pruner_init_lr,
                 momentum=args.momentum > 0,
                 l1_regularization_coeff=args.causal_pruner_l1_regularization_coeff,
@@ -226,7 +227,7 @@ def parse_args() -> argparse.Namespace:
         '--dataset_root_dir', type=str, default='../data',
         help='Directory to download datasets')
     parser.add_argument(
-        '--num_dataset_workers', type=int, default=4,
+        '--num_dataset_workers', type=int, default=6,
         help='Number of dataset workers')
     parser.add_argument(
         '--shuffle_dataset', action=argparse.BooleanOptionalAction,
@@ -235,7 +236,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--batch_size', type=int,
                         default=512, help='Batch size')
     parser.add_argument('--dataset_cache_size_limit_gb', type=int,
-                        default=8,
+                        default=16,
                         help='Size limit for dataset stochastic cache')
     # Dirs
     parser.add_argument(
@@ -291,10 +292,10 @@ def parse_args() -> argparse.Namespace:
         '--causal_pruner_init_lr', type=float, default=1e-2,
         help='Learning rate for causal pruner')
     parser.add_argument(
-        '--causal_pruner_l1_regularization_coeff', type=float, default=1e-14,
+        '--causal_pruner_l1_regularization_coeff', type=float, default=1e-3,
         help='Causal Pruner L1 regularization coefficient')
     parser.add_argument(
-        '--causal_pruner_max_iter', type=int, default=1000,
+        '--causal_pruner_max_iter', type=int, default=10,
         help='Maximum number of iterations to run causal pruner training')
     parser.add_argument(
         '--causal_pruner_loss_tol', type=float, default=1e-4,
@@ -306,7 +307,7 @@ def parse_args() -> argparse.Namespace:
         '--causal_pruner_batch_size', type=int, default=64,
         help='Batch size for causal pruner training. Use -1 to use the entire dataset')
     parser.add_argument(
-        '--num_causal_pruner_dataloader_workers', type=int, default=2,
+        '--num_causal_pruner_dataloader_workers', type=int, default=4,
         help='Number of DataLoader workers to use while training prune weights')
     parser.add_argument(
         '--delete_checkpoint_dir_after_training',
