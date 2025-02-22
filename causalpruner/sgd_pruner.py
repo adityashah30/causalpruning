@@ -8,7 +8,6 @@ import time
 import numpy as np
 import psutil
 import torch
-import torch.nn as nn
 import torch.nn.utils.prune as prune
 from torch.utils.data import Dataset, DataLoader
 from tqdm.auto import tqdm
@@ -122,9 +121,11 @@ class SGDPruner(Pruner):
             return
         self.write_tensor(torch.tensor(
             loss), self._get_checkpoint_path('loss'))
-        get_tensor = lambda param: torch.flatten(
+
+        def get_tensor(param): return torch.flatten(
             self.modules_dict[param].weight.detach().to(
                 device='cpu', non_blocking=True))
+
         weights = torch.cat(tuple(map(get_tensor, self.params)))
         self.write_tensor(weights, self._get_checkpoint_path('weights'))
         self.counter += 1
@@ -154,9 +155,10 @@ class SGDPruner(Pruner):
             del self.checkpoint_futures
             self.checkpoint_futures = []
         self.fabric.barrier()
-        weights_dir = os.path.join(self.weights_checkpoint_dir, f'{self.iteration}')
+        weights_dir = os.path.join(
+            self.weights_checkpoint_dir, f'{self.iteration}')
         loss_dir = os.path.join(self.loss_checkpoint_dir, f'{self.iteration}')
-        dataset = ParamDataset(weights_dir, loss_dir, 
+        dataset = ParamDataset(weights_dir, loss_dir,
                                self.trainer_config.momentum)
         self.trainer.reset()
         batch_size = self.config.batch_size
@@ -169,7 +171,7 @@ class SGDPruner(Pruner):
             pin_memory=True,
             shuffle=True,
             num_workers=num_workers,
-            persistent_workers=num_workers > 0)
+            persistent_workers=False)
         num_iters = self.trainer.fit(dataloader)
         if num_iters == self.trainer_config.max_iter:
             tqdm.write(f'Pruning failed to converge in ' +

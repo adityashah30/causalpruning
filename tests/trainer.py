@@ -157,7 +157,6 @@ class Trainer:
     def __init__(self, config: TrainerConfig, pruner: Optional[Pruner] = None):
         self.config = config
         self.fabric = config.fabric
-        self.fabric.seed_everything(314159)
         self.pruner = pruner
         # Shortcuts for easy access
         self.data_config = config.data_config
