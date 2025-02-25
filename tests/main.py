@@ -46,20 +46,20 @@ def delete_dir_if_exists(dir: str):
 
 
 def get_prune_optimizer(
-        name: str, model: nn.Module, lr: float, momentum: float) -> optim.Optimizer:
+        name: str, model: nn.Module, lr: float) -> optim.Optimizer:
     name = name.lower()
     if name == 'sgd':
-        return optim.SGD(model.parameters(), lr=lr, momentum=momentum)
+        return optim.SGD(model.parameters(), lr=lr)
     raise NotImplementedError(f'{name} is not a supported Optimizier')
 
 
 def get_train_optimizer(
-        name: str, model: nn.Module, lr: float, momentum: float) -> optim.Optimizer:
+        name: str, model: nn.Module, lr: float) -> optim.Optimizer:
     name = name.lower()
     if name == 'adam':
         return optim.Adam(model.parameters(), lr=lr)
     elif name == 'sgd':
-        return optim.SGD(model.parameters(), lr=lr, momentum=momentum)
+        return optim.SGD(model.parameters(), lr=lr)
     raise NotImplementedError(
         f'{name} is not a supported post-prune Optimizier')
 
@@ -88,7 +88,6 @@ def main(args):
         prune_identifier += f'_{iteration_id}_{alpha_id}'
     elif prune_identifier == 'magpruner':
         prune_identifier += f'_{args.mag_pruner_amount}'
-    momentum=args.momentum
     identifier = f'{model_name}_{dataset_name}_{prune_identifier}'
     suffix = args.suffix
     if suffix != '':
@@ -107,9 +106,9 @@ def main(args):
     fabric.launch()
     model = get_model(model_name, dataset_name)
     prune_optimizer = get_prune_optimizer(
-        args.optimizer, model, args.lr, momentum)
+        args.optimizer, model, args.lr)
     train_optimizer = get_train_optimizer(
-        args.train_optimizer, model, args.train_lr, momentum)
+        args.train_optimizer, model, args.train_lr)
     model, prune_optimizer, train_optimizer = fabric.setup(
         model, prune_optimizer, train_optimizer)
     world_size = fabric.world_size
@@ -147,7 +146,6 @@ def main(args):
             causal_weights_trainer_config = CausalWeightsTrainerConfig(
                 fabric=fabric,
                 init_lr=args.causal_pruner_init_lr,
-                momentum=args.momentum > 0,
                 l1_regularization_coeff=args.causal_pruner_l1_regularization_coeff,
                 max_iter=args.causal_pruner_max_iter,
                 loss_tol=args.causal_pruner_loss_tol,
@@ -164,8 +162,9 @@ def main(args):
                 batch_size=args.causal_pruner_batch_size,
                 num_dataloader_workers=args.num_causal_pruner_dataloader_workers,
                 multiprocess_checkpoint_writer=args.causal_pruner_multiprocessing_checkpoint_writer,
-                trainer_config=causal_weights_trainer_config,
-                delete_checkpoint_dir_after_training=args.delete_checkpoint_dir_after_training)
+                delete_checkpoint_dir_after_training=args.delete_checkpoint_dir_after_training,
+                use_zscaling=args.causal_pruner_use_zscaling,
+                trainer_config=causal_weights_trainer_config,)
         elif args.pruner == 'magpruner':
             pruner_config = MagPrunerConfig(
                 fabric=fabric,
@@ -268,7 +267,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--optimizer', type=str,
                         default='sgd', help='Optimizer', choices=['sgd'])
     parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate')
-    parser.add_argument('--momentum', type=float, default=0.0, help='Momentum')
     parser.add_argument(
         '--eval_after_epoch', action=argparse.BooleanOptionalAction,
         default=True,
@@ -295,7 +293,7 @@ def parse_args() -> argparse.Namespace:
         '--causal_pruner_l1_regularization_coeff', type=float, default=1e-3,
         help='Causal Pruner L1 regularization coefficient')
     parser.add_argument(
-        '--causal_pruner_max_iter', type=int, default=10,
+        '--causal_pruner_max_iter', type=int, default=1000,
         help='Maximum number of iterations to run causal pruner training')
     parser.add_argument(
         '--causal_pruner_loss_tol', type=float, default=1e-4,
@@ -314,6 +312,11 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=True,
         help='Deletes the checkpoint directory once params are trained. Used to save space.')
+    parser.add_argument(
+        '--causal_pruner_use_zscaling',
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help='Scales the causal pruner params by mean and std (Z-scaling) if enabled')
     parser.add_argument(
         '--causal_pruner_backend', type=str, default='torch',
         choices=['sklearn', 'torch'],

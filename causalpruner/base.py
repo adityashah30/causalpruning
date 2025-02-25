@@ -132,7 +132,8 @@ class Pruner(ABC):
             iteration_name = f'{self.iteration}'
             loss_dir = os.path.join(self.loss_checkpoint_dir, iteration_name)
             os.makedirs(loss_dir, exist_ok=True)
-            weights_dir = os.path.join(self.weights_checkpoint_dir, iteration_name)
+            weights_dir = os.path.join(
+                self.weights_checkpoint_dir, iteration_name)
             os.makedirs(weights_dir, exist_ok=True)
         self.fabric.barrier()
 
