@@ -111,10 +111,11 @@ class ZStatsComputer:
                 torch.square(self.mean)
             std_dev = torch.sqrt(variance)
             abs_std_dev = torch.abs(std_dev)
-            if abs_std_dev.numel() == 0 or (abs.std_dev > 0).sum() == 0:
-                min_std_dev = torch.tensor(1e-7, device = abs_std_dev.device)
+            non_zero_abs_std_dev = abs_std_dev > 0
+            if non_zero_abs_std_dev.sum() == 0:
+                min_std_dev = 1e-7
             else:
-                min_std_dev = torch.min(abs_std_dev[abs_std_dev > 0])
+                min_std_dev = torch.min(abs_std_dev[non_zero_abs_std_dev])
             #min_std_dev = torch.min(abs_std_dev[abs_std_dev > 0])
             std_dev[std_dev == 0] = min_std_dev
             self.std_ = std_dev
