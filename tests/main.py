@@ -315,7 +315,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--causal_pruner_use_zscaling',
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=True,
         help='Scales the causal pruner params by mean and std (Z-scaling) if enabled')
     parser.add_argument(
         '--causal_pruner_backend', type=str, default='torch',

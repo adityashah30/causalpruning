@@ -43,7 +43,7 @@ class ParamDataset(Dataset):
                              len(glob.glob(file_pattern, root_dir=self.loss_base_dir)))
         self.use_zscaling = use_zscaling
         self.weights_zstats = self._load_zstats(self.weights_base_dir)
-        self.loss_zstats = self._load_zstats(self.loss_base_dir)
+        self.num_dimensions = self.weights_zstats.mean.numel()
 
     @torch.no_grad()
     def _load_zstats(self, base_dir: str) -> ZStats:
@@ -62,14 +62,18 @@ class ParamDataset(Dataset):
         delta_weights = self.get_delta_param(
             self.weights_base_dir, idx, self.weights_zstats)
         delta_loss = self.get_delta_param(
-            self.loss_base_dir, idx, self.loss_zstats)
+            self.loss_base_dir, idx, None)
         return delta_weights, delta_loss
 
     @torch.no_grad()
-    def get_delta_param(self, dir: str, idx: int, zstats: ZStats) -> torch.Tensor:
+    def get_delta_param(self,
+                        dir: str,
+                        idx: int,
+                        zstats: Optional[ZStats] = None) -> torch.Tensor:
         param = self.get_tensor(dir, idx)
-        if self.use_zscaling:
+        if zstats is not None and self.use_zscaling:
             param = (param - zstats.mean) / zstats.std
+            param /= (self.num_dimensions * self.num_items)
         return param
 
     @torch.no_grad()

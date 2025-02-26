@@ -61,8 +61,7 @@ class CausalWeightsTrainerSklearn(CausalWeightsTrainer):
             max_iter=self.max_iter,
             tol=self.loss_tol,
             n_iter_no_change=self.num_iter_no_change,
-            shuffle=True,
-            verbose=True)
+            shuffle=True)
 
     def supports_batch_training(self) -> bool:
         return False
@@ -72,7 +71,6 @@ class CausalWeightsTrainerSklearn(CausalWeightsTrainer):
         X, Y = next(iter(dataloader))
         X = X.cpu().numpy()
         Y = np.ravel(Y.cpu().numpy())
-        print(f'{np.min(X)}; {np.max(X)}; {np.min(Y)}; {np.max(Y)}')
         self.trainer.fit(X, Y)
         return self.trainer.n_iter_
 
@@ -128,13 +126,10 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
                     numlossitems += 1
             total_loss = torch.tensor([sumloss])
             total_loss = self.fabric.all_reduce(total_loss, reduce_op='sum')
-            print(f'total_loss: {total_loss}')
             num_loss = torch.tensor([numlossitems])
             num_loss = self.fabric.all_reduce(num_loss, reduce_op='sum')
-            print(f'num_loss: {num_loss}')
             num_items = num_loss.item()
             loss = total_loss.item() / num_items
-            print(f'Loss: {loss:.2f}; best_loss: {best_loss:.2f}')
             if loss > (best_loss - self.loss_tol):
                 iter_no_change += 1
             else:
