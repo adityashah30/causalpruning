@@ -355,6 +355,8 @@ class Trainer:
                 f'Epoch: {epoch_str}; ' +
                 f'Loss/Train: {loss_avg.avg:.4f}; ' +
                 f'Accuracy/Test: {accuracy:.4f}')
+        del self.trainloader._iterator
+        self.trainloader._iterator = None
         self.pruner.compute_masks()
         self.compute_prune_stats()
         self.pruner.reset_weights()
