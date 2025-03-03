@@ -160,6 +160,7 @@ class DeltaComputer:
 class SGDPrunerConfig(PrunerConfig):
     batch_size: int
     num_dataloader_workers: int
+    pin_memory: bool
     multiprocess_checkpoint_writer: bool
     delete_checkpoint_dir_after_training: bool
     use_zscaling: bool
@@ -248,17 +249,20 @@ class SGDPruner(Pruner):
 
         dataset = ParamDataset(
             self.weights_dir, self.loss_dir, self.use_zscaling)
+
         batch_size = self.config.batch_size
         if batch_size < 0 or not self.trainer.supports_batch_training():
             batch_size = len(dataset)
         num_workers = self.config.num_dataloader_workers
+        pin_memory = self.config.pin_memory
+
         dataloader = DataLoader(
             dataset,
             batch_size=batch_size,
-            pin_memory=True,
+            pin_memory=pin_memory,
             shuffle=True,
             num_workers=num_workers,
-            persistent_workers=True)
+            persistent_workers=num_workers > 0)
 
         num_iters = self.trainer.fit(dataloader)
         if num_iters == self.trainer_config.max_iter:

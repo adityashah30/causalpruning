@@ -23,6 +23,7 @@ class DataConfig:
     num_classes: int
     batch_size: int
     num_workers: int
+    pin_memory: bool
     shuffle: bool
 
 
@@ -202,12 +203,12 @@ class Trainer:
         data_config = self.data_config
         self.trainloader = DataLoader(
             data_config.train_dataset, batch_size=data_config.batch_size,
-            shuffle=data_config.shuffle, pin_memory=True,
+            shuffle=data_config.shuffle, pin_memory=data_config.pin_memory,
             num_workers=data_config.num_workers,
             persistent_workers=data_config.num_workers > 0)
         self.testloader = DataLoader(
             data_config.test_dataset, batch_size=data_config.batch_size,
-            shuffle=False, pin_memory=True,
+            shuffle=False, pin_memory=data_config.pin_memory,
             num_workers=data_config.num_workers,
             persistent_workers=data_config.num_workers > 0)
         self.trainloader, self.testloader = self.fabric.setup_dataloaders(

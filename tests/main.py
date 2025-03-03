@@ -116,7 +116,8 @@ def main(args):
     data_config = DataConfig(
         train_dataset=train_dataset, test_dataset=test_dataset,
         batch_size=batch_size, num_workers=args.num_dataset_workers,
-        shuffle=args.shuffle_dataset, num_classes=num_classes)
+        pin_memory=args.pin_memory, shuffle=args.shuffle_dataset, 
+        num_classes=num_classes)
     epoch_config = EpochConfig(
         num_pre_prune_epochs=args.num_pre_prune_epochs if args.prune else 0,
         num_prune_iterations=args.num_prune_iterations if args.prune else 0,
@@ -161,10 +162,11 @@ def main(args):
                 reset_weights=args.reset_weights_after_pruning,
                 batch_size=args.causal_pruner_batch_size,
                 num_dataloader_workers=args.num_causal_pruner_dataloader_workers,
+                pin_memory=args.pin_memory,
                 multiprocess_checkpoint_writer=args.causal_pruner_multiprocessing_checkpoint_writer,
                 delete_checkpoint_dir_after_training=args.delete_checkpoint_dir_after_training,
                 use_zscaling=args.causal_pruner_use_zscaling,
-                trainer_config=causal_weights_trainer_config,)
+                trainer_config=causal_weights_trainer_config)
         elif args.pruner == 'magpruner':
             pruner_config = MagPrunerConfig(
                 fabric=fabric,
@@ -228,6 +230,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--num_dataset_workers', type=int, default=6,
         help='Number of dataset workers')
+    parser.add_argument(
+        '--pin_memory', action=argparse.BooleanOptionalAction,
+        default=True,
+        help='Pins memory to GPU when enabled.')
     parser.add_argument(
         '--shuffle_dataset', action=argparse.BooleanOptionalAction,
         default=True,
