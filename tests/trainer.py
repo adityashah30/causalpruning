@@ -170,7 +170,7 @@ class Trainer:
                                   (self.epoch_config.num_train_epochs_before_pruning
                                    + self.epoch_config.num_prune_epochs))
         self.device = self.fabric.device
-        self.pbar = tqdm(total=self.total_epochs)
+        self.pbar = tqdm(total=self.total_epochs, dynamic_ncols=True)
         self.global_step = -1
         self.writer = SummaryWriter(config.tensorboard_dir)
         self.writer.add_hparams(config.hparams, {})
@@ -238,7 +238,8 @@ class Trainer:
             config.model.train()
             loss_avg = AverageMeter()
             pbar = tqdm(self.trainloader, leave=False,
-                        desc=f'Pre-prune epoch: {epoch}')
+                        desc=f'Pre-prune epoch: {epoch}',
+                        dynamic_ncols=True)
             for batch_counter, data in enumerate(pbar):
                 inputs, labels = data
                 outputs = config.model(inputs)
@@ -282,9 +283,10 @@ class Trainer:
             self.pbar.update(1)
             config.model.train()
             loss_avg = AverageMeter()
-            pbar = tqdm(
-                self.trainloader, leave=False,
-                desc=f'Train before pruning epoch: {epoch}')
+            pbar = tqdm(self.trainloader, 
+                        leave=False,
+                        desc=f'Train before pruning epoch: {epoch}',
+                        dynamic_ncols=True)
             for batch_counter, data in enumerate(pbar):
                 inputs, labels = data
                 outputs = config.model(inputs)
@@ -326,7 +328,10 @@ class Trainer:
             loss_avg = AverageMeter()
             grad_step_loss_avg = AverageMeter()
             pbar = tqdm(
-                self.trainloader, leave=False, desc=f'Prune epoch: {epoch}')
+                self.trainloader, 
+                leave=False, 
+                desc=f'Prune epoch: {epoch}',
+                dynamic_ncols=True)
             for batch_counter, data in enumerate(pbar):
                 inputs, labels = data
                 outputs = config.model(inputs)
@@ -379,7 +384,10 @@ class Trainer:
             config.model.train()
             loss_avg = AverageMeter()
             pbar = tqdm(
-                self.trainloader, leave=False, desc=f'Train epoch: {epoch}')
+                self.trainloader, 
+                leave=False, 
+                desc=f'Train epoch: {epoch}',
+                dynamic_ncols=True)
             for batch_counter, data in enumerate(pbar):
                 inputs, labels = data
                 outputs = config.model(inputs)
@@ -430,7 +438,10 @@ class Trainer:
         model = self.config.model
         model.eval()
         self.val_accuracy.reset()
-        for data in tqdm(self.testloader, leave=False, desc='Eval'):
+        for data in tqdm(self.testloader, 
+                         leave=False, 
+                         desc='Eval', 
+                         dynamic_ncols=True):
             inputs, labels = data
             outputs = model(inputs)
             self.val_accuracy(outputs, labels)
@@ -442,7 +453,10 @@ class Trainer:
     def get_all_eval_metrics(self):
         model = self.config.model
         model.eval()
-        for data in tqdm(self.testloader, leave=False, desc='Eval Stats'):
+        for data in tqdm(self.testloader, 
+                         leave=False, 
+                         desc='Eval Stats',
+                         dynamic_ncols=True):
             inputs, labels = data
             outputs = model(inputs)
             self.metrics_computer.add(outputs, labels)
