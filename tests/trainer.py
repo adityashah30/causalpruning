@@ -72,6 +72,7 @@ class TrainerConfig:
     model: nn.Module
     prune_optimizer: optim.Optimizer
     train_optimizer: optim.Optimizer
+    train_optimizer_scheduler: Optional[optim.lr_scheduler.LRScheduler]
     train_convergence_loss_tolerance: float
     train_loss_num_epochs_no_change: int
     data_config: DataConfig
@@ -387,6 +388,8 @@ class Trainer:
                 if batch_counter % grad_step_num_batches == 0:
                     config.train_optimizer.step()
                     config.train_optimizer.zero_grad(set_to_none=True)
+                    if config.train_optimizer_scheduler is not None:
+                        config.train_optimizer_scheduler.step()
                 loss_avg.update(loss.item())
                 if (batch_counter + 1) % tqdm_update_frequency == 0:
                     pbar.update(tqdm_update_frequency)
