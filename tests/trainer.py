@@ -434,6 +434,9 @@ class Trainer:
             if step > 2 and avg_loss > 100:
                 print(f"Early stopping at step {step}: avg_loss {avg_loss:.4f} exceeds 100")
                 break
+
+            self.config.model.load_state_dict(init_state_dict)
+            self.config.train_optimizer.load_state_dict(init_opt_state_dict)
             
             
         self.config.model.load_state_dict(init_state_dict)
@@ -453,7 +456,9 @@ class Trainer:
             for param_group in  config.train_optimizer.param_groups:
                 param_group['lr'] = best_lr
             if config.train_optimizer_scheduler is not None:
-                config.train_optimizer_scheduler.base_lrs = [best_lr for _ in config.train_optimizer_scheduler.base_lrs]
+                config.train_optimizer_scheduler.base_lrs = [0.1*best_lr for _ in config.train_optimizer_scheduler.base_lrs]
+                if hasattr(config.train_optimizer_scheduler, 'max_lrs'):
+                    config.train_optimizer_scheduler.max_lrs = [best_lr for _ in config.train_optimizer_scheduler.max_lrs]
         print(f"Training will proceed with learning rate: {self.config.train_optimizer.param_groups[0]['lr']}")
         epoch_config = self.epoch_config
         num_batches_in_epoch = epoch_config.num_batches_in_epoch
