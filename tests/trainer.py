@@ -372,19 +372,19 @@ class Trainer:
     def _select_optimal_lr(self, lrs, losses):
         lrs = np.array(lrs)
         losses = np.array(losses)
-        loss_grad_arr = []
-        for x in losses:
-            loss_grad = np.gradient(x)
-            loss_grad_arr.append(np.mean(loss_grad))
-        loss_grad_arr = np.array(loss_grad_arr)
-        #loss_grad = np.gradient(losses)
+        # loss_grad_arr = []
+        # for x in losses:
+        #     loss_grad = np.gradient(x)
+        #     loss_grad_arr.append(np.mean(loss_grad))
+        # loss_grad_arr = np.array(loss_grad_arr)
+        loss_grad = np.gradient(losses)
         #loss_grad_smooth = np.convolve(loss_grad, np.ones(5)/5, mode='valid')
-        best_idx = np.argmin(loss_grad_arr)
+        best_idx = np.argmin(np.abs(loss_grad))
         best_lr = lrs[best_idx]
 
         return best_lr
     
-    def run_lrrt(self, min_lr=1e-5, max_lr=1, lr_factor = 5, num_steps=100, update_interval = 5):
+    def run_lrrt(self, min_lr=1e-5, max_lr=1, lr_factor = 5, num_steps=100, update_interval = 5, ewa_alpha=0.9):
         model = self.config.model
         optimizer = self.config.train_optimizer
         loss_fn = self.config.loss_fn
@@ -401,13 +401,15 @@ class Trainer:
         current_lr = optimizer.param_groups[0]['lr']
 
         
-        train_loader = iter(self.trainloader)
         for step in range(num_steps):
             if current_lr > 1:
                 print("Stopping early. Exceeded maximum test LR")
                 break
             print(f"LRRT Iteration for LR = {current_lr}")
             step_losses = []
+
+            ewa_loss = None
+            train_loader = iter(self.trainloader)
             for i in range(update_interval):
                 print(f"          Iteration {i}")
                 try:
@@ -422,10 +424,15 @@ class Trainer:
                 self.fabric.backward(loss)
                 optimizer.step()
                 step_losses.append(loss.item())
-            avg_loss = np.mean(step_losses)
+
+                if ewa_loss is None:
+                    ewa_loss = loss.item()
+                else:
+                    ewa_loss = ewa_alpha * ewa_loss + (1-ewa_alpha) * loss.item()
+            avg_loss = ewa_loss
             current_lr = optimizer.param_groups[0]['lr']
             lrs.append(current_lr)
-            losses.append(step_losses)
+            losses.append(avg_loss)
             # Update lr for next step.
             current_lr *= lr_factor
             for param_group in optimizer.param_groups:
@@ -452,13 +459,13 @@ class Trainer:
         self._load_model(self.config.model_to_load_for_training)
         config = self.config
         if config.hparams.get('optimizer','').lower() in ['sgd', 'sgd_momentum']:
-            best_lr = self.run_lrrt(min_lr=5e-4, max_lr=0.5, lr_factor=1.5, num_steps=300, update_interval=20)
+            best_lr_min = 0.1*self.run_lrrt(min_lr=5e-4, max_lr=0.5, lr_factor=1.5, num_steps=300, update_interval=20)
             for param_group in  config.train_optimizer.param_groups:
-                param_group['lr'] = best_lr
+                param_group['lr'] = best_lr_min
             if config.train_optimizer_scheduler is not None:
-                config.train_optimizer_scheduler.base_lrs = [0.1*best_lr for _ in config.train_optimizer_scheduler.base_lrs]
+                config.train_optimizer_scheduler.base_lrs = [best_lr_min for _ in config.train_optimizer_scheduler.base_lrs]
                 if hasattr(config.train_optimizer_scheduler, 'max_lrs'):
-                    config.train_optimizer_scheduler.max_lrs = [best_lr for _ in config.train_optimizer_scheduler.max_lrs]
+                    config.train_optimizer_scheduler.max_lrs = [best_lr_min*10 for _ in config.train_optimizer_scheduler.max_lrs]
         print(f"Training will proceed with learning rate: {self.config.train_optimizer.param_groups[0]['lr']}")
         epoch_config = self.epoch_config
         num_batches_in_epoch = epoch_config.num_batches_in_epoch
