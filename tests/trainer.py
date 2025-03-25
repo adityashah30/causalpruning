@@ -372,14 +372,19 @@ class Trainer:
     def _select_optimal_lr(self, lrs, losses):
         lrs = np.array(lrs)
         losses = np.array(losses)
-        loss_grad = np.gradient(losses)
-        loss_grad_smooth = np.convolve(loss_grad, np.ones(2)/2, mode='valid')
-        best_idx = np.argmin(loss_grad_smooth)
+        loss_grad_arr = []
+        for x in losses:
+            loss_grad = np.gradient(x)
+            loss_grad_arr.append(np.mean(loss_grad))
+        loss_grad_arr = np.array(loss_grad_arr)
+        #loss_grad = np.gradient(losses)
+        #loss_grad_smooth = np.convolve(loss_grad, np.ones(5)/5, mode='valid')
+        best_idx = np.argmin(loss_grad_arr)
         best_lr = lrs[best_idx]
 
         return best_lr
     
-    def run_lrrt(self, min_lr=1e-5, max_lr=1.0, lr_factor = 5, num_steps=100, update_interval = 10):
+    def run_lrrt(self, min_lr=1e-5, max_lr=1, lr_factor = 5, num_steps=100, update_interval = 5):
         model = self.config.model
         optimizer = self.config.train_optimizer
         loss_fn = self.config.loss_fn
@@ -390,37 +395,49 @@ class Trainer:
         init_state_dict = model.state_dict()
         init_opt_state_dict = optimizer.state_dict()
 
+        
         for param_group in optimizer.param_groups:
             param_group['lr'] = min_lr
+        current_lr = optimizer.param_groups[0]['lr']
+
         
         train_loader = iter(self.trainloader)
         for step in range(num_steps):
-            print(f"LRRT Iteration: {step}")
+            if current_lr > 1:
+                print("Stopping early. Exceeded maximum test LR")
+                break
+            print(f"LRRT Iteration for LR = {current_lr}")
             step_losses = []
-            for _ in range(update_interval):
+            for i in range(update_interval):
+                print(f"          Iteration {i}")
                 try:
                     inputs, labels = next(train_loader)
                 except StopIteration:
                     train_loader = iter(self.trainloader)
                     inputs, labels = next(train_loader)
-                optimizer.zero_grad()
+                
+                optimizer.zero_grad(set_to_none=True)
                 outputs = model(inputs)
                 loss = loss_fn(outputs, labels)
-                loss.backward()
+                self.fabric.backward(loss)
                 optimizer.step()
                 step_losses.append(loss.item())
             avg_loss = np.mean(step_losses)
             current_lr = optimizer.param_groups[0]['lr']
             lrs.append(current_lr)
-            losses.append(avg_loss)
+            losses.append(step_losses)
             # Update lr for next step.
+            current_lr *= lr_factor
             for param_group in optimizer.param_groups:
-                param_group['lr'] *= lr_factor
-            if step > 2 and avg_loss > 100000 * min(losses):
-                print(f"Early stopping at step {step}: avg_loss {avg_loss:.4f} exceeds 10e4 x min(losses)")
+                param_group['lr'] = current_lr
+
+            if step > 2 and avg_loss > 100:
+                print(f"Early stopping at step {step}: avg_loss {avg_loss:.4f} exceeds 100")
                 break
             
-        model.load_state_dict(init_state_dict)
+            
+        self.config.model.load_state_dict(init_state_dict)
+        self.config.train_optimizer.load_state_dict(init_opt_state_dict)
 
         np.savez('lrrt_data.npz', lrs=lrs, losses=losses)
         print("LRRT data saved to lrrt_data.npz")
@@ -431,11 +448,13 @@ class Trainer:
     def _run_training(self):
         self._load_model(self.config.model_to_load_for_training)
         config = self.config
-        if config.hparams.get('optimizer','').lower() == 'sgd':
-            best_lr = self.run_lrrt(min_lr=1e-9, max_lr=1.0, lr_factor=2, num_steps=300)
+        if config.hparams.get('optimizer','').lower() in ['sgd', 'sgd_momentum']:
+            best_lr = self.run_lrrt(min_lr=5e-4, max_lr=0.5, lr_factor=1.5, num_steps=300, update_interval=20)
             for param_group in  config.train_optimizer.param_groups:
                 param_group['lr'] = best_lr
-            print(f"Training will proceed with learning rate: {best_lr}")
+            if config.train_optimizer_scheduler is not None:
+                config.train_optimizer_scheduler.base_lrs = [best_lr for _ in config.train_optimizer_scheduler.base_lrs]
+        print(f"Training will proceed with learning rate: {self.config.train_optimizer.param_groups[0]['lr']}")
         epoch_config = self.epoch_config
         num_batches_in_epoch = epoch_config.num_batches_in_epoch
         grad_step_num_batches = epoch_config.grad_step_num_batches
