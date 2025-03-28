@@ -394,20 +394,6 @@ class Trainer:
         lrs = np.array(lrs)
         losses = np.array(losses)
         losses = np.convolve(losses, np.ones(2)/2, mode='valid')
-        # loss_grad_arr = []
-        # for x in losses:
-        #     loss_grad = np.gradient(x)
-        #     loss_grad_arr.append(np.mean(loss_grad))
-        #loss_grad_arr = np.array(loss_grad_arr)
-        # diff_loss = np.diff(losses)
-        # best_diff = diff_loss[0]
-        # best_lr = lrs[0]
-        # for _, (lr, grad) in enumerate(zip(lrs[1:], diff_loss[1:])):
-        #     if grad>=0:
-        #         return best_lr
-        #     if np.abs(grad)<=np.abs(best_diff):
-        #         best_diff = grad
-        #         best_lr = lr
         loss_grad = np.gradient(losses)
         best_idx = np.argmin(np.abs(loss_grad))
         best_lr = lrs[best_idx+1]
@@ -465,12 +451,9 @@ class Trainer:
                 else:
                     ewa_loss = ewa_alpha * ewa_loss + (1-ewa_alpha) * loss.item()
                 pbar.set_postfix(loss=f"{loss.item():.4f}", ewa_loss=f"{ewa_loss:.4f}")
-            #pbar.close()
             avg_loss = ewa_loss
-            #current_lr = optimizer.param_groups[0]['lr']
             lrs.append(current_lr)
             losses.append(avg_loss)
-            # Update lr for next step.
             current_lr *= lr_factor
             for param_group in optimizer.param_groups:
                 param_group['lr'] = current_lr
@@ -520,10 +503,6 @@ class Trainer:
                 param_group['lr'] = best_lr_min
             if config.use_one_cycle_lr_scheduler:
                 config.train_optimizer_scheduler = self.get_one_cycle_LR_scheduler(max_lr, best_lr_min)
-            # if config.train_optimizer_scheduler is not None:
-            #     config.train_optimizer_scheduler.base_lrs = [best_lr_min for _ in config.train_optimizer_scheduler.base_lrs]
-                # if hasattr(config.train_optimizer_scheduler, 'max_lrs'):
-                #     config.train_optimizer_scheduler.max_lrs = [best_lr_min*10 for _ in config.train_optimizer_scheduler.max_lrs]
 
         print(f"Training will proceed with learning rate: {self.config.train_optimizer.param_groups[0]['lr']}")
         epoch_config = self.epoch_config
