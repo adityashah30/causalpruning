@@ -170,19 +170,15 @@ def main(args):
         num_batches_in_epoch=args.num_batches_in_epoch,
         grad_step_num_batches=args.grad_step_num_batches,
         tqdm_update_frequency=args.tqdm_update_frequency)
-    train_optimizer_scheduler = get_onecycle_lr_scheduler(
-        train_optimizer, 
-        enabled=args.use_one_cycle_lr_scheduler, 
-        max_lr=args.lr_scheduler_max_lr,
-        base_lr=args.train_lr,
-        total_steps=get_train_steps(epoch_config, data_config))
+
     trainer_config = TrainerConfig(
         hparams=vars(args),
         fabric=fabric,
         model=model,
         prune_optimizer=prune_optimizer,
         train_optimizer=train_optimizer,
-        train_optimizer_scheduler=train_optimizer_scheduler,
+        train_optimizer_scheduler= None,
+        use_one_cycle_lr_scheduler=args.use_one_cycle_lr_scheduler,
         train_convergence_loss_tolerance=args.train_convergence_loss_tolerance,
         train_loss_num_epochs_no_change=args.train_loss_num_epochs_no_change,
         data_config=data_config, epoch_config=epoch_config,

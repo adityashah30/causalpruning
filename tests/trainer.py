@@ -72,13 +72,14 @@ class TrainerConfig:
     model: nn.Module
     prune_optimizer: optim.Optimizer
     train_optimizer: optim.Optimizer
-    train_optimizer_scheduler: Optional[optim.lr_scheduler.LRScheduler]
     train_convergence_loss_tolerance: float
     train_loss_num_epochs_no_change: int
     data_config: DataConfig
     epoch_config: EpochConfig
     tensorboard_dir: str
     checkpoint_dir: str
+    train_optimizer_scheduler: Optional[optim.lr_scheduler.LRScheduler] = None
+    use_one_cycle_lr_scheduler: bool = False
     loss_fn: Callable = F.cross_entropy
     verbose: bool = True
     train_only: bool = False
@@ -367,10 +368,143 @@ class Trainer:
         self.pruner.compute_masks()
         self.compute_prune_stats()
         self.pruner.reset_weights()
+    
+    def _calculate_total_steps(self):
+        epoch_config = self.epoch_config
+        data_config = self.data_config
+        
+        num_items = len(data_config.train_dataset)
+        batch_size = data_config.batch_size
+        num_epochs = epoch_config.num_train_epochs
+        num_batches_in_epoch = epoch_config.num_batches_in_epoch
+        grad_step_num_batches = epoch_config.grad_step_num_batches
+        
+        num_batches = (num_items + batch_size - 1) // batch_size
+        if num_batches_in_epoch <= 0:
+            num_batches_in_epoch = num_batches
+        
+        total_steps = num_epochs * num_batches_in_epoch
+        if grad_step_num_batches > 0:
+            total_steps = (total_steps + grad_step_num_batches - 1) // grad_step_num_batches
+        
+        return total_steps
+    
+
+    def _select_optimal_lr(self, lrs, losses):
+        lrs = np.array(lrs)
+        losses = np.array(losses)
+        losses = np.convolve(losses, np.ones(2)/2, mode='valid')
+        loss_grad = np.gradient(losses)
+        best_idx = np.argmin(np.abs(loss_grad))
+        best_lr = lrs[best_idx+1]
+
+        return best_lr
+    
+    def run_lrrt(self, min_lr=1e-5, max_lr=1, lr_factor = 5, num_steps=100, ewa_alpha=0.15):
+        model = self.config.model
+        optimizer = self.config.train_optimizer
+        loss_fn = self.config.loss_fn
+
+        lrs = []
+        losses = []
+
+        init_state_dict = model.state_dict()
+        init_opt_state_dict = optimizer.state_dict()
+
+        
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = min_lr
+        current_lr = min_lr
+
+        steps_per_epoch = len(self.trainloader)
+        update_interval = int(0.1*steps_per_epoch)
+        
+        for step in range(num_steps):
+            if current_lr > max_lr:
+                print("Stopping early. Exceeded maximum test LR")
+                break
+            step_losses = []
+
+            ewa_loss = None
+            train_loader = iter(self.trainloader)
+            pbar = tqdm(
+                range(update_interval), 
+                leave=False, 
+                desc=f'LRRT iteration for LR: {current_lr:.6f}',
+                dynamic_ncols=True)
+            for i in pbar:
+                try:
+                    inputs, labels = next(train_loader)
+                except StopIteration:
+                    train_loader = iter(self.trainloader)
+                    inputs, labels = next(train_loader)
+                
+                optimizer.zero_grad(set_to_none=True)
+                outputs = model(inputs)
+                loss = loss_fn(outputs, labels)
+                self.fabric.backward(loss)
+                optimizer.step()
+                step_losses.append(loss.item())
+
+                if ewa_loss is None:
+                    ewa_loss = loss.item()
+                else:
+                    ewa_loss = ewa_alpha * ewa_loss + (1-ewa_alpha) * loss.item()
+                pbar.set_postfix(loss=f"{loss.item():.4f}", ewa_loss=f"{ewa_loss:.4f}")
+            avg_loss = ewa_loss
+            lrs.append(current_lr)
+            losses.append(avg_loss)
+            current_lr *= lr_factor
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = current_lr
+
+            if step > 2 and avg_loss > 100:
+                print(f"Early stopping at step {step}: avg_loss {avg_loss:.4f} exceeds 100")
+                break
+
+            self.config.model.load_state_dict(init_state_dict)
+            self.config.train_optimizer.load_state_dict(init_opt_state_dict)
+            
+            
+        self.config.model.load_state_dict(init_state_dict)
+        self.config.train_optimizer.load_state_dict(init_opt_state_dict)
+
+        np.savez('lrrt_data.npz', lrs=lrs, losses=losses)
+        print("LRRT data saved to lrrt_data.npz")
+
+
+        return self._select_optimal_lr(lrs, losses)
+
+
+
+    def get_one_cycle_LR_scheduler(self, max_lr, best_lr_min):
+
+        total_steps = self._calculate_total_steps()
+
+        return optim.lr_scheduler.OneCycleLR(
+                    self.config.train_optimizer,
+                    max_lr = max_lr,
+                    total_steps = total_steps,
+                    pct_start=0.1,
+                    div_factor = max_lr/best_lr_min,
+                    final_div_factor=max_lr / (best_lr_min * 0.0001),  # final_lr = initial_lr/final_div_factor
+                    anneal_strategy="cos",
+                    three_phase=False,
+                )
+
 
     def _run_training(self):
         self._load_model(self.config.model_to_load_for_training)
         config = self.config
+        if config.hparams.get('optimizer','').lower() in ['sgd', 'sgd_momentum']:
+            max_lr = self.run_lrrt(min_lr=5e-4, max_lr=0.5, lr_factor=1.5, num_steps=300)
+            best_lr_min = 0.1*max_lr
+            for param_group in  config.train_optimizer.param_groups:
+                param_group['lr'] = best_lr_min
+            if config.use_one_cycle_lr_scheduler:
+                config.train_optimizer_scheduler = self.get_one_cycle_LR_scheduler(max_lr, best_lr_min)
+
+        print(f"Training will proceed with learning rate: {self.config.train_optimizer.param_groups[0]['lr']}")
         epoch_config = self.epoch_config
         num_batches_in_epoch = epoch_config.num_batches_in_epoch
         grad_step_num_batches = epoch_config.grad_step_num_batches
