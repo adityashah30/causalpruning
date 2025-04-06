@@ -297,7 +297,7 @@ class Trainer:
         num_batches_in_epoch = epoch_config.num_batches_in_epoch
         grad_step_num_batches = epoch_config.grad_step_num_batches
         tqdm_update_frequency = epoch_config.tqdm_update_frequency
-        self.train_optimizer.load_state_dict(self.train_optimizer_init_state)
+        self.config.train_optimizer.load_state_dict(self.train_optimizer_init_state)
         for epoch in range(epoch_config.num_train_epochs_before_pruning):
             self.global_step += 1
             self.pbar.update(1)
