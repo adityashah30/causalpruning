@@ -68,6 +68,7 @@ class EpochConfig:
 
 @dataclass
 class LRRangeFinderConfig:
+    enable: bool
     min_lr: float
     max_lr: float
     # Fraction of epoch to run for each learning rate to get the loss.
@@ -84,6 +85,7 @@ class TrainerConfig:
     model: nn.Module
     prune_optimizer: optim.Optimizer
     train_optimizer: optim.Optimizer
+    lrrt_config: LRRangeFinderConfig
     train_convergence_loss_tolerance: float
     train_loss_num_epochs_no_change: int
     data_config: DataConfig
@@ -91,7 +93,6 @@ class TrainerConfig:
     tensorboard_dir: str
     checkpoint_dir: str
     use_one_cycle_lr_scheduler: bool = False
-    lr_range_finder_config: Optional[LRRangeFinderConfig] = None
     loss_fn: Callable = F.cross_entropy
     verbose: bool = True
     train_only: bool = False
@@ -182,6 +183,7 @@ class Trainer:
         self.data_config = config.data_config
         self.epoch_config = config.epoch_config
         self.total_epochs = self.epoch_config.num_train_epochs
+        self.lr_scheduler = None
         if not config.train_only:
             self.total_epochs += (self.epoch_config.num_pre_prune_epochs
                                   + self.epoch_config.num_prune_iterations *
@@ -407,18 +409,8 @@ class Trainer:
         return total_steps
     
 
-    def _select_optimal_lr(self, lrs: list[float], losses: list[float]) -> float:
-        lrs = np.array(lrs)
-        losses = np.array(losses)
-        losses = np.convolve(losses, np.ones(2)/2, mode='valid')
-        loss_grad = np.gradient(losses)
-        best_idx = np.argmin(np.abs(loss_grad))
-        best_lr = lrs[best_idx+1]
-        return best_lr
-   
-
     def run_lrrt(self):
-        lrrt_config = self.config.lr_range_finder_config
+        lrrt_config = self.config.lrrt_config
         model = self.config.model
         optimizer = self.config.train_optimizer
         loss_fn = self.config.loss_fn
@@ -496,7 +488,7 @@ class Trainer:
     def _run_training(self):
         self._load_model(self.config.model_to_load_for_training)
         config = self.config
-        if config.lr_range_finder_config is not None:
+        if config.lrrt_config.enable:
             max_lr = self.run_lrrt()
             set_optimizer_lr(config.train_optimizer, max_lr)
             if config.use_one_cycle_lr_scheduler:

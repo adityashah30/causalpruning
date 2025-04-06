@@ -135,7 +135,8 @@ def main(args):
         num_batches_in_epoch=args.num_batches_in_epoch,
         grad_step_num_batches=args.grad_step_num_batches,
         tqdm_update_frequency=args.tqdm_update_frequency)
-    lr_range_finder_config = LRRangeFinderConfig(
+    lrrt_config = LRRangeFinderConfig(
+        enable=args.run_lrrt,
         min_lr=args.lrrt_min_lr,
         max_lr=args.lrrt_max_lr,
         epoch_frac=args.lrrt_epoch_frac,
@@ -148,6 +149,7 @@ def main(args):
         model=model,
         prune_optimizer=prune_optimizer,
         train_optimizer=train_optimizer,
+        lrrt_config=lrrt_config,
         train_convergence_loss_tolerance=args.train_convergence_loss_tolerance,
         train_loss_num_epochs_no_change=args.train_loss_num_epochs_no_change,
         data_config=data_config, epoch_config=epoch_config,
@@ -157,7 +159,6 @@ def main(args):
         model_to_load_for_training=args.model_to_load_for_training,
         model_to_save_after_training=args.model_to_save_after_training,
         use_one_cycle_lr_scheduler=args.use_one_cycle_lr_scheduler,
-        lr_range_finder_config=lr_range_finder_config,
     )
     pruner = None
     if args.prune:
@@ -233,6 +234,10 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=True,
         help='Uses the one cycle lr scheduler when train_optimzier is either `sgd` or `sgd_momentum`')
+    parser.add_argument(
+        '--run_lrrt', 
+        action=argparse.BooleanOptionalAction, default=True,
+        help='Runs the Learning Rate Range Finder test if enabled')
     parser.add_argument('--lrrt_max_lr', type=float, default=1.0,
                         help='Max LR to use for LRRT')
     parser.add_argument('--lrrt_min_lr', type=float, default=1e-6, 
