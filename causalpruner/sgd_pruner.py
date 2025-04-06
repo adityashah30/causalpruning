@@ -20,7 +20,9 @@ from causalpruner.causal_weights_trainer import (
     get_causal_weights_trainer,
 )
 
+
 _ZSTATS_PATTERN = 'zstats.pth'
+_SENTINEL = 1e-10
 
 
 @dataclass
@@ -116,11 +118,10 @@ class ZStatsComputer:
             std_dev = torch.sqrt(variance)
             abs_std_dev = torch.abs(std_dev)
             non_zero_abs_std_dev = abs_std_dev > 0
-            if non_zero_abs_std_dev.sum() == 0:
-                min_std_dev = 1e-7
+            if not torch.any(non_zero_abs_std_dev):
+                min_std_dev = _SENTINEL
             else:
                 min_std_dev = torch.min(abs_std_dev[non_zero_abs_std_dev])
-            #min_std_dev = torch.min(abs_std_dev[abs_std_dev > 0])
             std_dev[std_dev == 0] = min_std_dev
             self.std_ = std_dev
         return self.std_
@@ -159,6 +160,7 @@ class DeltaComputer:
 class SGDPrunerConfig(PrunerConfig):
     batch_size: int
     num_dataloader_workers: int
+    pin_memory: bool
     multiprocess_checkpoint_writer: bool
     delete_checkpoint_dir_after_training: bool
     use_zscaling: bool
@@ -247,17 +249,20 @@ class SGDPruner(Pruner):
 
         dataset = ParamDataset(
             self.weights_dir, self.loss_dir, self.use_zscaling)
+
         batch_size = self.config.batch_size
         if batch_size < 0 or not self.trainer.supports_batch_training():
             batch_size = len(dataset)
         num_workers = self.config.num_dataloader_workers
+        pin_memory = self.config.pin_memory
+
         dataloader = DataLoader(
             dataset,
             batch_size=batch_size,
-            pin_memory=True,
+            pin_memory=pin_memory,
             shuffle=True,
             num_workers=num_workers,
-            persistent_workers=True)
+            persistent_workers=num_workers > 0)
 
         num_iters = self.trainer.fit(dataloader)
         if num_iters == self.trainer_config.max_iter:

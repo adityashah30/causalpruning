@@ -9,6 +9,7 @@ sys.path.insert(
 
 import argparse
 import shutil
+from typing import Optional
 
 from lightning.fabric import Fabric
 import torch
@@ -31,6 +32,7 @@ from pruner.mag_pruner import (
 from trainer import (
     DataConfig,
     EpochConfig,
+    LRRangeFinderConfig,
     Pruner,
     Trainer,
     TrainerConfig,
@@ -60,6 +62,12 @@ def get_train_optimizer(
         return optim.Adam(model.parameters(), lr=lr)
     elif name == 'sgd':
         return optim.SGD(model.parameters(), lr=lr)
+    elif name == 'sgd_momentum':
+        return optim.SGD(model.parameters(), 
+                         lr=lr, 
+                         momentum=0.9,
+                         nesterov=True,
+                         weight_decay=1e-4)
     raise NotImplementedError(
         f'{name} is not a supported post-prune Optimizier')
 
@@ -116,7 +124,8 @@ def main(args):
     data_config = DataConfig(
         train_dataset=train_dataset, test_dataset=test_dataset,
         batch_size=batch_size, num_workers=args.num_dataset_workers,
-        shuffle=args.shuffle_dataset, num_classes=num_classes)
+        pin_memory=args.pin_memory, shuffle=args.shuffle_dataset, 
+        num_classes=num_classes)
     epoch_config = EpochConfig(
         num_pre_prune_epochs=args.num_pre_prune_epochs if args.prune else 0,
         num_prune_iterations=args.num_prune_iterations if args.prune else 0,
@@ -126,6 +135,13 @@ def main(args):
         num_batches_in_epoch=args.num_batches_in_epoch,
         grad_step_num_batches=args.grad_step_num_batches,
         tqdm_update_frequency=args.tqdm_update_frequency)
+    lr_range_finder_config = LRRangeFinderConfig(
+        min_lr=args.lrrt_min_lr,
+        max_lr=args.lrrt_max_lr,
+        epoch_frac=args.lrrt_epoch_frac,
+        lr_factor=args.lrrt_lr_factor,
+        ewa_alpha=args.lrrt_ewa_alpha,
+    )
     trainer_config = TrainerConfig(
         hparams=vars(args),
         fabric=fabric,
@@ -139,7 +155,10 @@ def main(args):
         verbose=args.verbose,
         train_only=args.train_only,
         model_to_load_for_training=args.model_to_load_for_training,
-        model_to_save_after_training=args.model_to_save_after_training)
+        model_to_save_after_training=args.model_to_save_after_training,
+        use_one_cycle_lr_scheduler=args.use_one_cycle_lr_scheduler,
+        lr_range_finder_config=lr_range_finder_config,
+    )
     pruner = None
     if args.prune:
         if args.pruner == 'causalpruner':
@@ -161,10 +180,11 @@ def main(args):
                 reset_weights=args.reset_weights_after_pruning,
                 batch_size=args.causal_pruner_batch_size,
                 num_dataloader_workers=args.num_causal_pruner_dataloader_workers,
+                pin_memory=args.pin_memory,
                 multiprocess_checkpoint_writer=args.causal_pruner_multiprocessing_checkpoint_writer,
                 delete_checkpoint_dir_after_training=args.delete_checkpoint_dir_after_training,
                 use_zscaling=args.causal_pruner_use_zscaling,
-                trainer_config=causal_weights_trainer_config,)
+                trainer_config=causal_weights_trainer_config)
         elif args.pruner == 'magpruner':
             pruner_config = MagPrunerConfig(
                 fabric=fabric,
@@ -204,10 +224,25 @@ def parse_args() -> argparse.Namespace:
                         help='Maximum number of epochs for train the model')
     parser.add_argument(
         '--train_optimizer', type=str, default='adam',
-        help='Training Optimizer', choices=['adam', 'sgd'])
+        help='Training Optimizer', choices=['adam', 'sgd', 'sgd_momentum'])
     parser.add_argument(
         '--train_lr', type=float, default=5e-4,
         help='Learning rate for the train optimizer')
+    parser.add_argument(
+        '--use_one_cycle_lr_scheduler',
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help='Uses the one cycle lr scheduler when train_optimzier is either `sgd` or `sgd_momentum`')
+    parser.add_argument('--lrrt_max_lr', type=float, default=1.0,
+                        help='Max LR to use for LRRT')
+    parser.add_argument('--lrrt_min_lr', type=float, default=1e-6, 
+                        help='Min LR to use for LRRT')
+    parser.add_argument('--lrrt_epoch_frac', type=float, default=0.1, 
+                        help='Epoch fraction to use for LRRT')
+    parser.add_argument('--lrrt_lr_factor', type=float, default=1.5, 
+                        help='Multiply learning rate by this value every step')
+    parser.add_argument('--lrrt_ewa_alpha', type=float, default=0.15, 
+                        help='Smoothing factor used for LRRT')
     parser.add_argument('--train_only',
                         action=argparse.BooleanOptionalAction,
                         default=False,
@@ -228,6 +263,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--num_dataset_workers', type=int, default=6,
         help='Number of dataset workers')
+    parser.add_argument(
+        '--pin_memory', action=argparse.BooleanOptionalAction,
+        default=True,
+        help='Pins memory to GPU when enabled.')
     parser.add_argument(
         '--shuffle_dataset', action=argparse.BooleanOptionalAction,
         default=True,

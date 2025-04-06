@@ -1,3 +1,4 @@
+import copy
 from dataclasses import dataclass
 import os
 from typing import Callable, Optional, Union
@@ -23,6 +24,7 @@ class DataConfig:
     num_classes: int
     batch_size: int
     num_workers: int
+    pin_memory: bool
     shuffle: bool
 
 
@@ -65,6 +67,17 @@ class EpochConfig:
 
 
 @dataclass
+class LRRangeFinderConfig:
+    min_lr: float
+    max_lr: float
+    # Fraction of epoch to run for each learning rate to get the loss.
+    # Use a larger value for small datasets to get an accurate loss.
+    epoch_frac: float = 0.1
+    lr_factor: float = 1.5
+    ewa_alpha: float = 0.15
+
+
+@dataclass
 class TrainerConfig:
     hparams: dict[str, str]
     fabric: Fabric
@@ -77,6 +90,8 @@ class TrainerConfig:
     epoch_config: EpochConfig
     tensorboard_dir: str
     checkpoint_dir: str
+    use_one_cycle_lr_scheduler: bool = False
+    lr_range_finder_config: Optional[LRRangeFinderConfig] = None
     loss_fn: Callable = F.cross_entropy
     verbose: bool = True
     train_only: bool = False
@@ -152,6 +167,11 @@ class MetricsComputer:
         )
 
 
+def set_optimizer_lr(optimizer: optim.Optimizer, new_lr: float):
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = new_lr
+
+
 class Trainer:
 
     def __init__(self, config: TrainerConfig, pruner: Optional[Pruner] = None):
@@ -168,7 +188,7 @@ class Trainer:
                                   (self.epoch_config.num_train_epochs_before_pruning
                                    + self.epoch_config.num_prune_epochs))
         self.device = self.fabric.device
-        self.pbar = tqdm(total=self.total_epochs)
+        self.pbar = tqdm(total=self.total_epochs, dynamic_ncols=True)
         self.global_step = -1
         self.writer = SummaryWriter(config.tensorboard_dir)
         self.writer.add_hparams(config.hparams, {})
@@ -202,12 +222,12 @@ class Trainer:
         data_config = self.data_config
         self.trainloader = DataLoader(
             data_config.train_dataset, batch_size=data_config.batch_size,
-            shuffle=data_config.shuffle, pin_memory=True,
+            shuffle=data_config.shuffle, pin_memory=data_config.pin_memory,
             num_workers=data_config.num_workers,
             persistent_workers=data_config.num_workers > 0)
         self.testloader = DataLoader(
             data_config.test_dataset, batch_size=data_config.batch_size,
-            shuffle=False, pin_memory=True,
+            shuffle=False, pin_memory=data_config.pin_memory,
             num_workers=data_config.num_workers,
             persistent_workers=data_config.num_workers > 0)
         self.trainloader, self.testloader = self.fabric.setup_dataloaders(
@@ -236,7 +256,8 @@ class Trainer:
             config.model.train()
             loss_avg = AverageMeter()
             pbar = tqdm(self.trainloader, leave=False,
-                        desc=f'Pre-prune epoch: {epoch}')
+                        desc=f'Pre-prune epoch: {epoch}',
+                        dynamic_ncols=True)
             for batch_counter, data in enumerate(pbar):
                 inputs, labels = data
                 outputs = config.model(inputs)
@@ -280,9 +301,10 @@ class Trainer:
             self.pbar.update(1)
             config.model.train()
             loss_avg = AverageMeter()
-            pbar = tqdm(
-                self.trainloader, leave=False,
-                desc=f'Train before pruning epoch: {epoch}')
+            pbar = tqdm(self.trainloader, 
+                        leave=False,
+                        desc=f'Train before pruning epoch: {epoch}',
+                        dynamic_ncols=True)
             for batch_counter, data in enumerate(pbar):
                 inputs, labels = data
                 outputs = config.model(inputs)
@@ -324,7 +346,10 @@ class Trainer:
             loss_avg = AverageMeter()
             grad_step_loss_avg = AverageMeter()
             pbar = tqdm(
-                self.trainloader, leave=False, desc=f'Prune epoch: {epoch}')
+                self.trainloader, 
+                leave=False, 
+                desc=f'Prune epoch: {epoch}',
+                dynamic_ncols=True)
             for batch_counter, data in enumerate(pbar):
                 inputs, labels = data
                 outputs = config.model(inputs)
@@ -355,13 +380,130 @@ class Trainer:
                 f'Epoch: {epoch_str}; ' +
                 f'Loss/Train: {loss_avg.avg:.4f}; ' +
                 f'Accuracy/Test: {accuracy:.4f}')
+        del self.trainloader._iterator
+        self.trainloader._iterator = None
         self.pruner.compute_masks()
         self.compute_prune_stats()
         self.pruner.reset_weights()
+    
+    def _calculate_total_steps(self):
+        epoch_config = self.epoch_config
+        data_config = self.data_config
+        
+        num_items = len(data_config.train_dataset)
+        batch_size = data_config.batch_size
+        num_epochs = epoch_config.num_train_epochs
+        num_batches_in_epoch = epoch_config.num_batches_in_epoch
+        grad_step_num_batches = epoch_config.grad_step_num_batches
+        
+        num_batches = (num_items + batch_size - 1) // batch_size
+        if num_batches_in_epoch <= 0:
+            num_batches_in_epoch = num_batches
+        
+        total_steps = num_epochs * num_batches_in_epoch
+        if grad_step_num_batches > 0:
+            total_steps = (total_steps + grad_step_num_batches - 1) // grad_step_num_batches
+        
+        return total_steps
+    
+
+    def _select_optimal_lr(self, lrs: list[float], losses: list[float]) -> float:
+        lrs = np.array(lrs)
+        losses = np.array(losses)
+        losses = np.convolve(losses, np.ones(2)/2, mode='valid')
+        loss_grad = np.gradient(losses)
+        best_idx = np.argmin(np.abs(loss_grad))
+        best_lr = lrs[best_idx+1]
+        return best_lr
+   
+
+    def run_lrrt(self):
+        lrrt_config = self.config.lr_range_finder_config
+        model = self.config.model
+        optimizer = self.config.train_optimizer
+        loss_fn = self.config.loss_fn
+
+        lrs = []
+        losses = []
+
+        init_state_dict = copy.deepcopy(model.state_dict())
+        init_opt_state_dict = copy.deepcopy(optimizer.state_dict())
+
+        steps_per_epoch = len(self.trainloader)
+        update_interval = int(lrrt_config.epoch_frac * steps_per_epoch)
+
+        current_lr = lrrt_config.min_lr
+        ewa_alpha = lrrt_config.ewa_alpha
+
+        while current_lr < lrrt_config.max_lr:
+            optimizer.load_state_dict(init_opt_state_dict)
+            set_optimizer_lr(optimizer, current_lr)
+
+            total_loss = 0.0
+            num_step = 0
+            for data in tqdm(self.trainloader, 
+                             desc=f'LRRT for {current_lr}',
+                             leave=False,
+                             dynamic_ncols=True):
+                inputs, labels = data
+                outputs = model(inputs)
+                loss = loss_fn(outputs, labels)
+                self.fabric.backward(loss)
+                total_loss = ewa_alpha * total_loss + (1 - ewa_alpha) * loss.item()
+                num_step += 1
+                if num_step >= update_interval:
+                    break
+            total_loss /= num_step
+            lrs.append(current_lr)
+            losses.append(total_loss)
+            current_lr *= lrrt_config.lr_factor
+        
+        model.load_state_dict(init_state_dict)
+        optimizer.load_state_dict(init_opt_state_dict)
+
+        lrs = np.array(lrs)
+        losses = np.array(losses)
+
+        np.savez(os.path.join(self.config.checkpoint_dir, 'lrrt.npz'),
+                 lrs=lrs, losses=losses)
+
+        best_lr = lrs[-1]
+        diffs = np.diff(losses)
+        for index, diff in enumerate(diffs):
+            if diff > 0:
+                best_lr = lrs[index]
+                break
+
+        return best_lr
+
+
+    def create_one_cycle_lr_scheduler(self, min_lr, max_lr):
+        optimizer = self.config.train_optimizer
+        if not isinstance(optimizer, optim.SGD):
+            return
+        total_steps = self._calculate_total_steps()
+        self.lr_scheduler = optim.lr_scheduler.OneCycleLR(
+            self.config.train_optimizer,
+            max_lr=max_lr,
+            total_steps=total_steps,
+            pct_start=0.1,
+            div_factor=max_lr / min_lr,
+            final_div_factor=max_lr / (min_lr * 0.0001),  # final_lr = initial_lr/final_div_factor
+            anneal_strategy="cos",
+            three_phase=False)
+
 
     def _run_training(self):
         self._load_model(self.config.model_to_load_for_training)
         config = self.config
+        if config.lr_range_finder_config is not None:
+            max_lr = self.run_lrrt()
+            set_optimizer_lr(config.train_optimizer, max_lr)
+            if config.use_one_cycle_lr_scheduler:
+                min_lr = 0.1 * max_lr
+                set_optimizer_lr(config.train_optimizer, min_lr)
+                self.create_one_cycle_lr_scheduler(min_lr, max_lr)
+        print(f'Training will proceed with learning rate: {config.train_optimizer.param_groups[0]["lr"]}')
         epoch_config = self.epoch_config
         num_batches_in_epoch = epoch_config.num_batches_in_epoch
         grad_step_num_batches = epoch_config.grad_step_num_batches
@@ -375,7 +517,10 @@ class Trainer:
             config.model.train()
             loss_avg = AverageMeter()
             pbar = tqdm(
-                self.trainloader, leave=False, desc=f'Train epoch: {epoch}')
+                self.trainloader, 
+                leave=False, 
+                desc=f'Train epoch: {epoch}',
+                dynamic_ncols=True)
             for batch_counter, data in enumerate(pbar):
                 inputs, labels = data
                 outputs = config.model(inputs)
@@ -384,6 +529,8 @@ class Trainer:
                 if batch_counter % grad_step_num_batches == 0:
                     config.train_optimizer.step()
                     config.train_optimizer.zero_grad(set_to_none=True)
+                    if self.lr_scheduler is not None:
+                        self.lr_scheduler.step()
                 loss_avg.update(loss.item())
                 if (batch_counter + 1) % tqdm_update_frequency == 0:
                     pbar.update(tqdm_update_frequency)
@@ -424,7 +571,10 @@ class Trainer:
         model = self.config.model
         model.eval()
         self.val_accuracy.reset()
-        for data in tqdm(self.testloader, leave=False, desc='Eval'):
+        for data in tqdm(self.testloader, 
+                         leave=False, 
+                         desc='Eval', 
+                         dynamic_ncols=True):
             inputs, labels = data
             outputs = model(inputs)
             self.val_accuracy(outputs, labels)
@@ -436,7 +586,10 @@ class Trainer:
     def get_all_eval_metrics(self):
         model = self.config.model
         model.eval()
-        for data in tqdm(self.testloader, leave=False, desc='Eval Stats'):
+        for data in tqdm(self.testloader, 
+                         leave=False, 
+                         desc='Eval Stats',
+                         dynamic_ncols=True):
             inputs, labels = data
             outputs = model(inputs)
             self.metrics_computer.add(outputs, labels)
