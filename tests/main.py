@@ -139,8 +139,7 @@ def main(args):
         enable=args.run_lrrt,
         min_lr=args.lrrt_min_lr,
         max_lr=args.lrrt_max_lr,
-        epoch_frac=args.lrrt_epoch_frac,
-        lr_factor=args.lrrt_lr_factor,
+        num_steps=args.lrrt_num_steps,
         ewa_alpha=args.lrrt_ewa_alpha,
     )
     trainer_config = TrainerConfig(
@@ -238,15 +237,13 @@ def parse_args() -> argparse.Namespace:
         '--run_lrrt', 
         action=argparse.BooleanOptionalAction, default=True,
         help='Runs the Learning Rate Range Finder test if enabled')
-    parser.add_argument('--lrrt_max_lr', type=float, default=1.0,
+    parser.add_argument('--lrrt_max_lr', type=float, default=10.0,
                         help='Max LR to use for LRRT')
-    parser.add_argument('--lrrt_min_lr', type=float, default=1e-6, 
+    parser.add_argument('--lrrt_min_lr', type=float, default=1e-7, 
                         help='Min LR to use for LRRT')
-    parser.add_argument('--lrrt_epoch_frac', type=float, default=0.1, 
-                        help='Epoch fraction to use for LRRT')
-    parser.add_argument('--lrrt_lr_factor', type=float, default=1.5, 
-                        help='Multiply learning rate by this value every step')
-    parser.add_argument('--lrrt_ewa_alpha', type=float, default=0.15, 
+    parser.add_argument('--lrrt_num_steps', type=int, default=1000,
+                        help='Number of steps to run LRRT')
+    parser.add_argument('--lrrt_ewa_alpha', type=float, default=0.98, 
                         help='Smoothing factor used for LRRT')
     parser.add_argument('--train_only',
                         action=argparse.BooleanOptionalAction,

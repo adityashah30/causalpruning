@@ -71,11 +71,8 @@ class LRRangeFinderConfig:
     enable: bool
     min_lr: float
     max_lr: float
-    # Fraction of epoch to run for each learning rate to get the loss.
-    # Use a larger value for small datasets to get an accurate loss.
-    epoch_frac: float = 0.1
-    lr_factor: float = 1.5
-    ewa_alpha: float = 0.15
+    num_steps: int
+    ewa_alpha: float = 0.98
 
 
 @dataclass
@@ -408,63 +405,63 @@ class Trainer:
         
         return total_steps
     
-
-    def run_lrrt(self):
+    def _run_lrrt(self):
         lrrt_config = self.config.lrrt_config
         model = self.config.model
         optimizer = self.config.train_optimizer
         loss_fn = self.config.loss_fn
-
-        lrs = []
-        losses = []
-
-        init_state_dict = copy.deepcopy(model.state_dict())
-        init_opt_state_dict = copy.deepcopy(optimizer.state_dict())
-
-        steps_per_epoch = len(self.trainloader)
-        update_interval = int(lrrt_config.epoch_frac * steps_per_epoch)
-
-        current_lr = lrrt_config.min_lr
+        num_steps = lrrt_config.num_steps
+        max_lr = lrrt_config.max_lr
+        min_lr = lrrt_config.min_lr
+        mult = (max_lr / min_lr) ** (1/num_steps)
+        lr = min_lr
         ewa_alpha = lrrt_config.ewa_alpha
 
-        while current_lr < lrrt_config.max_lr:
-            optimizer.load_state_dict(init_opt_state_dict)
-            set_optimizer_lr(optimizer, current_lr)
-
-            total_loss = 0.0
-            num_step = 0
-            for data in tqdm(self.trainloader, 
-                             desc=f'LRRT for {current_lr}',
-                             leave=False,
-                             dynamic_ncols=True):
+        init_model_state = copy.deepcopy(model.state_dict())
+        init_optimizer_state = copy.deepcopy(optimizer.state_dict())
+        
+        avg_loss = 0.0
+        batch_num = 0
+        best_loss = np.inf
+        losses = []
+        lrs = []
+        pbar = tqdm(range(num_steps),
+                    desc='Running LRRT',
+                    leave=False,
+                    dynamic_ncols=True)
+        while batch_num < num_steps:
+            for data in self.trainloader:
+                batch_num += 1
+                pbar.update(1)
+                if batch_num >= num_steps:
+                    break
+                set_optimizer_lr(optimizer, lr)
                 inputs, labels = data
+                optimizer.zero_grad(set_to_none=True)
                 outputs = model(inputs)
                 loss = loss_fn(outputs, labels)
-                self.fabric.backward(loss)
-                total_loss = ewa_alpha * total_loss + (1 - ewa_alpha) * loss.item()
-                num_step += 1
-                if num_step >= update_interval:
+                avg_loss = ewa_alpha * avg_loss + (1 - ewa_alpha) * loss.item()
+                smoothed_loss = avg_loss / (1 - ewa_alpha ** batch_num)
+                if smoothed_loss > 4 * best_loss:
                     break
-            total_loss /= num_step
-            lrs.append(current_lr)
-            losses.append(total_loss)
-            current_lr *= lrrt_config.lr_factor
-        
-        model.load_state_dict(init_state_dict)
-        optimizer.load_state_dict(init_opt_state_dict)
-
-        lrs = np.array(lrs)
-        losses = np.array(losses)
+                if smoothed_loss < best_loss:
+                    best_loss = smoothed_loss
+                losses.append(smoothed_loss)
+                lrs.append(lr)
+                self.fabric.backward(loss)
+                optimizer.step()
+                lr *= mult
 
         np.savez(os.path.join(self.config.checkpoint_dir, 'lrrt.npz'),
                  lrs=lrs, losses=losses)
 
-        best_lr = lrs[-1]
-        diffs = np.diff(losses)
-        for index, diff in enumerate(diffs):
-            if diff > 0:
-                best_lr = lrs[index]
-                break
+        losses = losses[10:-5]
+        lrs = lrs[10:-5]
+
+        model.load_state_dict(init_model_state)
+        optimizer.load_state_dict(init_optimizer_state)
+
+        best_lr = lrs[np.argmin(losses)]
 
         return best_lr
 
@@ -489,13 +486,12 @@ class Trainer:
         self._load_model(self.config.model_to_load_for_training)
         config = self.config
         if config.lrrt_config.enable:
-            max_lr = self.run_lrrt()
-            set_optimizer_lr(config.train_optimizer, max_lr)
+            max_lr = self._run_lrrt()
+            min_lr = 0.1 * max_lr
+            set_optimizer_lr(config.train_optimizer, min_lr)
             if config.use_one_cycle_lr_scheduler:
-                min_lr = 0.1 * max_lr
-                set_optimizer_lr(config.train_optimizer, min_lr)
                 self.create_one_cycle_lr_scheduler(min_lr, max_lr)
-        print(f'Training will proceed with learning rate: {config.train_optimizer.param_groups[0]["lr"]}')
+        print(f'Setting learning rate: {config.train_optimizer.param_groups[0]["lr"]}')
         epoch_config = self.epoch_config
         num_batches_in_epoch = epoch_config.num_batches_in_epoch
         grad_step_num_batches = epoch_config.grad_step_num_batches
