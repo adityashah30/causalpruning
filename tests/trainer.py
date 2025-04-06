@@ -1,3 +1,4 @@
+import copy
 from dataclasses import dataclass
 import os
 from typing import Callable, Optional, Union
@@ -66,6 +67,17 @@ class EpochConfig:
 
 
 @dataclass
+class LRRangeFinderConfig:
+    min_lr: float
+    max_lr: float
+    # Fraction of epoch to run for each learning rate to get the loss.
+    # Use a larger value for small datasets to get an accurate loss.
+    epoch_frac: float = 0.1
+    lr_factor: float = 1.5
+    ewa_alpha: float = 0.15
+
+
+@dataclass
 class TrainerConfig:
     hparams: dict[str, str]
     fabric: Fabric
@@ -78,8 +90,8 @@ class TrainerConfig:
     epoch_config: EpochConfig
     tensorboard_dir: str
     checkpoint_dir: str
-    train_optimizer_scheduler: Optional[optim.lr_scheduler.LRScheduler] = None
     use_one_cycle_lr_scheduler: bool = False
+    lr_range_finder_config: Optional[LRRangeFinderConfig] = None
     loss_fn: Callable = F.cross_entropy
     verbose: bool = True
     train_only: bool = False
@@ -153,6 +165,11 @@ class MetricsComputer:
             recall=self.recall.compute(),
             f1_score=self.f1_score.compute()
         )
+
+
+def set_optimizer_lr(optimizer: optim.Optimizer, new_lr: float):
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = new_lr
 
 
 class Trainer:
@@ -390,17 +407,18 @@ class Trainer:
         return total_steps
     
 
-    def _select_optimal_lr(self, lrs, losses):
+    def _select_optimal_lr(self, lrs: list[float], losses: list[float]) -> float:
         lrs = np.array(lrs)
         losses = np.array(losses)
         losses = np.convolve(losses, np.ones(2)/2, mode='valid')
         loss_grad = np.gradient(losses)
         best_idx = np.argmin(np.abs(loss_grad))
         best_lr = lrs[best_idx+1]
-
         return best_lr
-    
-    def run_lrrt(self, min_lr=1e-5, max_lr=1, lr_factor = 5, num_steps=100, ewa_alpha=0.15):
+   
+
+    def run_lrrt(self):
+        lrrt_config = self.config.lr_range_finder_config
         model = self.config.model
         optimizer = self.config.train_optimizer
         loss_fn = self.config.loss_fn
@@ -408,103 +426,84 @@ class Trainer:
         lrs = []
         losses = []
 
-        init_state_dict = model.state_dict()
-        init_opt_state_dict = optimizer.state_dict()
-
-        
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = min_lr
-        current_lr = min_lr
+        init_state_dict = copy.deepcopy(model.state_dict())
+        init_opt_state_dict = copy.deepcopy(optimizer.state_dict())
 
         steps_per_epoch = len(self.trainloader)
-        update_interval = int(0.1*steps_per_epoch)
-        
-        for step in range(num_steps):
-            if current_lr > max_lr:
-                print("Stopping early. Exceeded maximum test LR")
-                break
-            step_losses = []
+        update_interval = int(lrrt_config.epoch_frac * steps_per_epoch)
 
-            ewa_loss = None
-            train_loader = iter(self.trainloader)
-            pbar = tqdm(
-                range(update_interval), 
-                leave=False, 
-                desc=f'LRRT iteration for LR: {current_lr:.6f}',
-                dynamic_ncols=True)
-            for i in pbar:
-                try:
-                    inputs, labels = next(train_loader)
-                except StopIteration:
-                    train_loader = iter(self.trainloader)
-                    inputs, labels = next(train_loader)
-                
-                optimizer.zero_grad(set_to_none=True)
+        current_lr = lrrt_config.min_lr
+        ewa_alpha = lrrt_config.ewa_alpha
+
+        while current_lr < lrrt_config.max_lr:
+            optimizer.load_state_dict(init_opt_state_dict)
+            set_optimizer_lr(optimizer, current_lr)
+
+            total_loss = 0.0
+            num_step = 0
+            for data in tqdm(self.trainloader, 
+                             desc=f'LRRT for {current_lr}',
+                             leave=False,
+                             dynamic_ncols=True):
+                inputs, labels = data
                 outputs = model(inputs)
                 loss = loss_fn(outputs, labels)
                 self.fabric.backward(loss)
-                optimizer.step()
-                step_losses.append(loss.item())
-
-                if ewa_loss is None:
-                    ewa_loss = loss.item()
-                else:
-                    ewa_loss = ewa_alpha * ewa_loss + (1-ewa_alpha) * loss.item()
-                pbar.set_postfix(loss=f"{loss.item():.4f}", ewa_loss=f"{ewa_loss:.4f}")
-            avg_loss = ewa_loss
+                total_loss = ewa_alpha * total_loss + (1 - ewa_alpha) * loss.item()
+                num_step += 1
+                if num_step >= update_interval:
+                    break
+            total_loss /= num_step
             lrs.append(current_lr)
-            losses.append(avg_loss)
-            current_lr *= lr_factor
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = current_lr
+            losses.append(total_loss)
+            current_lr *= lrrt_config.lr_factor
+        
+        model.load_state_dict(init_state_dict)
+        optimizer.load_state_dict(init_opt_state_dict)
 
-            if step > 2 and avg_loss > 100:
-                print(f"Early stopping at step {step}: avg_loss {avg_loss:.4f} exceeds 100")
+        lrs = np.array(lrs)
+        losses = np.array(losses)
+
+        np.savez(os.path.join(self.config.checkpoint_dir, 'lrrt.npz'),
+                 lrs=lrs, losses=losses)
+
+        best_lr = lrs[-1]
+        diffs = np.diff(losses)
+        for index, diff in enumerate(diffs):
+            if diff > 0:
+                best_lr = lrs[index]
                 break
 
-            self.config.model.load_state_dict(init_state_dict)
-            self.config.train_optimizer.load_state_dict(init_opt_state_dict)
-            
-            
-        self.config.model.load_state_dict(init_state_dict)
-        self.config.train_optimizer.load_state_dict(init_opt_state_dict)
-
-        np.savez('lrrt_data.npz', lrs=lrs, losses=losses)
-        print("LRRT data saved to lrrt_data.npz")
+        return best_lr
 
 
-        return self._select_optimal_lr(lrs, losses)
-
-
-
-    def get_one_cycle_LR_scheduler(self, max_lr, best_lr_min):
-
+    def create_one_cycle_lr_scheduler(self, min_lr, max_lr):
+        optimizer = self.config.train_optimizer
+        if not isinstance(optimizer, optim.SGD):
+            return
         total_steps = self._calculate_total_steps()
-
-        return optim.lr_scheduler.OneCycleLR(
-                    self.config.train_optimizer,
-                    max_lr = max_lr,
-                    total_steps = total_steps,
-                    pct_start=0.1,
-                    div_factor = max_lr/best_lr_min,
-                    final_div_factor=max_lr / (best_lr_min * 0.0001),  # final_lr = initial_lr/final_div_factor
-                    anneal_strategy="cos",
-                    three_phase=False,
-                )
+        self.lr_scheduler = optim.lr_scheduler.OneCycleLR(
+            self.config.train_optimizer,
+            max_lr=max_lr,
+            total_steps=total_steps,
+            pct_start=0.1,
+            div_factor=max_lr / min_lr,
+            final_div_factor=max_lr / (min_lr * 0.0001),  # final_lr = initial_lr/final_div_factor
+            anneal_strategy="cos",
+            three_phase=False)
 
 
     def _run_training(self):
         self._load_model(self.config.model_to_load_for_training)
         config = self.config
-        if config.hparams.get('optimizer','').lower() in ['sgd', 'sgd_momentum']:
-            max_lr = self.run_lrrt(min_lr=5e-4, max_lr=0.5, lr_factor=1.5, num_steps=300)
-            best_lr_min = 0.1*max_lr
-            for param_group in  config.train_optimizer.param_groups:
-                param_group['lr'] = best_lr_min
+        if config.lr_range_finder_config is not None:
+            max_lr = self.run_lrrt()
+            set_optimizer_lr(config.train_optimizer, max_lr)
             if config.use_one_cycle_lr_scheduler:
-                config.train_optimizer_scheduler = self.get_one_cycle_LR_scheduler(max_lr, best_lr_min)
-
-        print(f"Training will proceed with learning rate: {self.config.train_optimizer.param_groups[0]['lr']}")
+                min_lr = 0.1 * max_lr
+                set_optimizer_lr(config.train_optimizer, min_lr)
+                self.create_one_cycle_lr_scheduler(min_lr, max_lr)
+        print(f'Training will proceed with learning rate: {config.train_optimizer.param_groups[0]["lr"]}')
         epoch_config = self.epoch_config
         num_batches_in_epoch = epoch_config.num_batches_in_epoch
         grad_step_num_batches = epoch_config.grad_step_num_batches
@@ -530,8 +529,8 @@ class Trainer:
                 if batch_counter % grad_step_num_batches == 0:
                     config.train_optimizer.step()
                     config.train_optimizer.zero_grad(set_to_none=True)
-                    if config.train_optimizer_scheduler is not None:
-                        config.train_optimizer_scheduler.step()
+                    if self.lr_scheduler is not None:
+                        self.lr_scheduler.step()
                 loss_avg.update(loss.item())
                 if (batch_counter + 1) % tqdm_update_frequency == 0:
                     pbar.update(tqdm_update_frequency)

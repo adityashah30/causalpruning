@@ -32,6 +32,7 @@ from pruner.mag_pruner import (
 from trainer import (
     DataConfig,
     EpochConfig,
+    LRRangeFinderConfig,
     Pruner,
     Trainer,
     TrainerConfig,
@@ -69,42 +70,6 @@ def get_train_optimizer(
                          weight_decay=1e-4)
     raise NotImplementedError(
         f'{name} is not a supported post-prune Optimizier')
-
-
-def get_train_steps(epoch_config: EpochConfig, data_config: DataConfig) -> int:
-    num_items = len(data_config.train_dataset)
-    batch_size = data_config.batch_size
-    num_epochs = epoch_config.num_train_epochs
-    num_batches_in_epoch = epoch_config.num_batches_in_epoch
-    grad_step_num_batches = epoch_config.grad_step_num_batches
-
-    num_batches = (num_items + batch_size - 1) // batch_size
-    if num_batches_in_epoch <= 0:
-        num_batches_in_epoch = num_batches
-    total_steps = num_epochs * num_batches_in_epoch
-    if grad_step_num_batches > 0:
-        total_steps = (total_steps + grad_step_num_batches - 1) // grad_step_num_batches
-    return total_steps
-
-
-def get_onecycle_lr_scheduler(
-        optimizer: optim.Optimizer, enabled: bool,
-        max_lr: float, base_lr: float, 
-        total_steps: int) -> Optional[optim.lr_scheduler.LRScheduler]:
-    if not enabled:
-        return None
-    if not isinstance(optimizer, optim.SGD):
-        return None
-    return optim.lr_scheduler.OneCycleLR(
-        optimizer,
-        max_lr=max_lr,
-        total_steps=total_steps,
-        pct_start=0.1,
-        div_factor=max_lr / base_lr,  # initial_lr = max_lr/div_factor
-        final_div_factor=max_lr / (base_lr * 0.0001),  # final_lr = initial_lr/final_div_factor
-        anneal_strategy="cos",
-        three_phase=False,
-    )
 
 
 def get_pruner(pruner_config: PrunerConfig) -> Pruner:
@@ -170,15 +135,19 @@ def main(args):
         num_batches_in_epoch=args.num_batches_in_epoch,
         grad_step_num_batches=args.grad_step_num_batches,
         tqdm_update_frequency=args.tqdm_update_frequency)
-
+    lr_range_finder_config = LRRangeFinderConfig(
+        min_lr=args.lrrt_min_lr,
+        max_lr=args.lrrt_max_lr,
+        epoch_frac=args.lrrt_epoch_frac,
+        lr_factor=args.lrrt_lr_factor,
+        ewa_alpha=args.lrrt_ewa_alpha,
+    )
     trainer_config = TrainerConfig(
         hparams=vars(args),
         fabric=fabric,
         model=model,
         prune_optimizer=prune_optimizer,
         train_optimizer=train_optimizer,
-        train_optimizer_scheduler= None,
-        use_one_cycle_lr_scheduler=args.use_one_cycle_lr_scheduler,
         train_convergence_loss_tolerance=args.train_convergence_loss_tolerance,
         train_loss_num_epochs_no_change=args.train_loss_num_epochs_no_change,
         data_config=data_config, epoch_config=epoch_config,
@@ -186,7 +155,10 @@ def main(args):
         verbose=args.verbose,
         train_only=args.train_only,
         model_to_load_for_training=args.model_to_load_for_training,
-        model_to_save_after_training=args.model_to_save_after_training)
+        model_to_save_after_training=args.model_to_save_after_training,
+        use_one_cycle_lr_scheduler=args.use_one_cycle_lr_scheduler,
+        lr_range_finder_config=lr_range_finder_config,
+    )
     pruner = None
     if args.prune:
         if args.pruner == 'causalpruner':
@@ -261,8 +233,16 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=True,
         help='Uses the one cycle lr scheduler when train_optimzier is either `sgd` or `sgd_momentum`')
-    parser.add_argument('--lr_scheduler_max_lr', 
-                        type=float, default=0.4, help='Max LR for OneCycleLRScheduler')
+    parser.add_argument('--lrrt_max_lr', type=float, default=1.0,
+                        help='Max LR to use for LRRT')
+    parser.add_argument('--lrrt_min_lr', type=float, default=1e-6, 
+                        help='Min LR to use for LRRT')
+    parser.add_argument('--lrrt_epoch_frac', type=float, default=0.1, 
+                        help='Epoch fraction to use for LRRT')
+    parser.add_argument('--lrrt_lr_factor', type=float, default=1.5, 
+                        help='Multiply learning rate by this value every step')
+    parser.add_argument('--lrrt_ewa_alpha', type=float, default=0.15, 
+                        help='Smoothing factor used for LRRT')
     parser.add_argument('--train_only',
                         action=argparse.BooleanOptionalAction,
                         default=False,
