@@ -146,6 +146,9 @@ def main(args):
         num_steps=args.lrrt_num_steps,
         ewa_alpha=args.lrrt_ewa_alpha,
     )
+    early_stopping = (
+        False if args.use_one_cycle_lr_scheduler else args.early_stopping,
+    )
     trainer_config = TrainerConfig(
         hparams=vars(args),
         fabric=fabric,
@@ -153,6 +156,7 @@ def main(args):
         prune_optimizer=prune_optimizer,
         train_optimizer=train_optimizer,
         lrrt_config=lrrt_config,
+        early_stopping=early_stopping,
         train_convergence_loss_tolerance=args.train_convergence_loss_tolerance,
         train_loss_num_epochs_no_change=args.train_loss_num_epochs_no_change,
         data_config=data_config,
@@ -239,6 +243,12 @@ def parse_args() -> argparse.Namespace:
         help="Model name",
     )
     parser.add_argument(
+        "--early_stopping",
+        type=argparse.BooleanOptionalAction,
+        default=True,
+        help="Stops training early if the loss stops decreasing. Disabled if one cycle LR is used though",
+    )
+    parser.add_argument(
         "--train_convergence_loss_tolerance",
         type=float,
         default=1e-4,
@@ -266,7 +276,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--train_lr",
         type=float,
-        default=0.1,
+        default=1e-3,
         help="Learning rate for the train optimizer",
     )
     parser.add_argument(

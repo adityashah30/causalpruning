@@ -80,6 +80,7 @@ class TrainerConfig:
     prune_optimizer: optim.Optimizer
     train_optimizer: optim.Optimizer
     lrrt_config: LRRangeFinderConfig
+    early_stopping: bool
     train_convergence_loss_tolerance: float
     train_loss_num_epochs_no_change: int
     data_config: DataConfig
@@ -563,7 +564,10 @@ class Trainer:
                 + f"Accuracy/Test: {accuracy:.4f}; "
                 + f"Best Accuracy/Test: {best_accuracy:.4f}"
             )
-            if iter_no_change >= config.train_loss_num_epochs_no_change:
+            if (
+                config.early_stopping
+                and iter_no_change >= config.train_loss_num_epochs_no_change
+            ):
                 tqdm.write(f"Model converged in {epoch + 1} epochs")
                 break
 
