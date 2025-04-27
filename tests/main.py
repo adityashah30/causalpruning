@@ -146,9 +146,9 @@ def main(args):
         num_steps=args.lrrt_num_steps,
         ewa_alpha=args.lrrt_ewa_alpha,
     )
-    early_stopping = (
-        False if args.use_one_cycle_lr_scheduler else args.early_stopping,
-    )
+    early_stopping = args.early_stopping
+    if args.use_one_cycle_lr_scheduler:
+        early_stopping = False
     trainer_config = TrainerConfig(
         hparams=vars(args),
         fabric=fabric,
@@ -244,7 +244,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--early_stopping",
-        type=argparse.BooleanOptionalAction,
+        action=argparse.BooleanOptionalAction,
         default=True,
         help="Stops training early if the loss stops decreasing. Disabled if one cycle LR is used though",
     )
