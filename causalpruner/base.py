@@ -21,7 +21,6 @@ class PrunerConfig:
 
 
 class Pruner(ABC):
-
     _SUPPORTED_MODULES = [
         nn.Linear,
         nn.Conv1d,
@@ -29,9 +28,7 @@ class Pruner(ABC):
         nn.Conv3d,
     ]
 
-    _PREFIXES_TO_CONSUME = [
-        '_forward_module.'
-    ]
+    _PREFIXES_TO_CONSUME = ["_forward_module."]
 
     @staticmethod
     def is_module_supported(module: nn.Module) -> bool:
@@ -45,7 +42,7 @@ class Pruner(ABC):
         for module in model.modules():
             if not Pruner.is_module_supported(module):
                 continue
-            prune.identity(module, 'weight')
+            prune.identity(module, "weight")
 
     def __init__(self, config: PrunerConfig):
         super().__init__()
@@ -64,16 +61,15 @@ class Pruner(ABC):
 
         self.params = []
         for module_name, module in self.modules_dict.items():
-            if hasattr(module, 'weight'):
+            if hasattr(module, "weight"):
                 self.params.append(module_name)
         self.params = sorted(self.params)
 
         self.checkpoint_dir = config.checkpoint_dir
-        self.init_model_path = os.path.join(self.checkpoint_dir, 'init.ckpt')
-        self.loss_checkpoint_dir = os.path.join(
-            self.checkpoint_dir, 'loss')
+        self.init_model_path = os.path.join(self.checkpoint_dir, "init.ckpt")
+        self.loss_checkpoint_dir = os.path.join(self.checkpoint_dir, "loss")
         self.weights_checkpoint_dir = os.path.join(
-            self.checkpoint_dir, 'weights')
+            self.checkpoint_dir, "weights")
 
         # Setup directories on the global_rank = 0
         if self.fabric.is_global_zero:
@@ -93,31 +89,35 @@ class Pruner(ABC):
     @abstractmethod
     def compute_masks(self) -> None:
         raise NotImplementedError(
-            "Pruner is an abstract class. Use an appropriate derived class.")
+            "Pruner is an abstract class. Use an appropriate derived class."
+        )
 
     @torch.no_grad()
     def apply_masks(self) -> None:
         for param in self.params:
             module = self.modules_dict[param]
-            prune.remove(module, 'weight')
+            prune.remove(module, "weight")
 
     @torch.no_grad()
     def apply_identity_masks(self) -> None:
         for param in self.params:
             module = self.modules_dict[param]
-            prune.identity(module, 'weight')
+            prune.identity(module, "weight")
 
     @torch.no_grad()
     def remove_masks(self) -> None:
         for _, module in self.modules_dict.items():
-            setattr(module, 'weight', module.weight_orig)
-            delattr(module, 'weight_orig')
-            delattr(module, 'weight_mask')
+            setattr(module, "weight", module.weight_orig)
+            delattr(module, "weight_orig")
+            delattr(module, "weight_mask")
             for k, hook in module._forward_pre_hooks.items():
                 if isinstance(hook, prune.BasePruningMethod):
                     del module._forward_pre_hooks[k]
 
-    def provide_loss(self, loss: float) -> None:
+    def provide_loss_before_step(self, loss: float) -> None:
+        pass
+
+    def provide_loss_after_step(self, loss: float) -> None:
         pass
 
     @torch.no_grad()
@@ -129,7 +129,7 @@ class Pruner(ABC):
         self.iteration += 1
         self.counter = 0
         if self.fabric.is_global_zero:
-            iteration_name = f'{self.iteration}'
+            iteration_name = f"{self.iteration}"
             loss_dir = os.path.join(self.loss_checkpoint_dir, iteration_name)
             os.makedirs(loss_dir, exist_ok=True)
             weights_dir = os.path.join(
@@ -144,10 +144,10 @@ class Pruner(ABC):
             return
         masks = dict()
         for name, module in self.modules_dict.items():
-            if hasattr(module, 'weight_mask'):
-                masks[name] = getattr(module, 'weight_mask')
+            if hasattr(module, "weight_mask"):
+                masks[name] = getattr(module, "weight_mask")
         self.remove_masks()
         self.config.model.load_state_dict(torch.load(self.init_model_path))
         for name, module in self.modules_dict.items():
             if name in masks:
-                prune.custom_from_mask(module, 'weight', masks[name])
+                prune.custom_from_mask(module, "weight", masks[name])

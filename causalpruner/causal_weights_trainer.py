@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Literal
 
 from lightning.fabric import Fabric
 import numpy as np
@@ -8,10 +8,12 @@ from sklearn.linear_model import SGDRegressor
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.utils.prune as prune
+import torch.optim as optim
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm, trange
 
-from causalpruner.lasso_optimizer import LassoSGD
+# from causalpruner.lasso_optimizer import LassoSGD
 
 
 @dataclass
@@ -19,18 +21,18 @@ class CausalWeightsTrainerConfig:
     fabric: Fabric
     init_lr: float
     l1_regularization_coeff: float
+    prune_amount: float
     max_iter: int
     loss_tol: float
     num_iter_no_change: int
-    backend: Literal['sklearn', 'torch'] = 'torch'
+    backend: Literal["sklearn", "torch"] = "torch"
 
 
 class CausalWeightsTrainer(ABC):
-
-    def __init__(self,
-                 config: CausalWeightsTrainerConfig):
+    def __init__(self, config: CausalWeightsTrainerConfig):
         self.init_lr = config.init_lr
         self.l1_regularization_coeff = config.l1_regularization_coeff
+        self.prune_amount = config.prune_amount
         self.max_iter = config.max_iter
         self.loss_tol = config.loss_tol
         self.num_iter_no_change = config.num_iter_no_change
@@ -39,35 +41,32 @@ class CausalWeightsTrainer(ABC):
         return True
 
     @abstractmethod
-    def fit(self,
-            dataloader: DataLoader) -> int:
-        raise NotImplementedError('Use the sklearn or pytorch version')
+    def fit(self, dataloader: DataLoader) -> int:
+        raise NotImplementedError("Use the sklearn or pytorch version")
 
     @abstractmethod
     def get_non_zero_weights(self) -> torch.Tensor:
-        raise NotImplementedError('Use the sklearn or pytorch version')
+        raise NotImplementedError("Use the sklearn or pytorch version")
 
 
 class CausalWeightsTrainerSklearn(CausalWeightsTrainer):
-
-    def __init__(self,
-                 config: CausalWeightsTrainerConfig):
+    def __init__(self, config: CausalWeightsTrainerConfig):
         super().__init__(config)
         self.trainer = SGDRegressor(
-            loss='squared_error',
-            penalty='l1',
+            loss="squared_error",
+            penalty="l1",
             alpha=self.l1_regularization_coeff,
             fit_intercept=False,
             max_iter=self.max_iter,
             tol=self.loss_tol,
             n_iter_no_change=self.num_iter_no_change,
-            shuffle=True)
+            shuffle=True,
+        )
 
     def supports_batch_training(self) -> bool:
         return False
 
-    def fit(self,
-            dataloader: DataLoader) -> int:
+    def fit(self, dataloader: DataLoader) -> int:
         X, Y = next(iter(dataloader))
         X = X.cpu().numpy()
         Y = np.ravel(Y.cpu().numpy())
@@ -84,53 +83,63 @@ class CausalWeightsTrainerSklearn(CausalWeightsTrainer):
 
 
 class CausalWeightsTrainerTorch(CausalWeightsTrainer):
-
-    def __init__(self,
-                 config: CausalWeightsTrainerConfig,
-                 num_params: int):
+    def __init__(
+        self,
+        config: CausalWeightsTrainerConfig,
+        num_params: int,
+        initial_mask=torch.Tensor,
+    ):
         super().__init__(config)
         self.fabric = config.fabric
         self.num_params = num_params
         self.layer = nn.Linear(self.num_params, 1, bias=False)
         nn.init.zeros_(self.layer.weight)
-        self.optimizer = LassoSGD(
+        mask = initial_mask.view_as(self.layer.weight)
+        prune.custom_from_mask(self.layer, "weight", mask)
+        self.optimizer = optim.SGD(
             self.layer.parameters(),
-            init_lr=self.init_lr, alpha=self.l1_regularization_coeff)
+            lr=self.init_lr,
+            momentum=0.9,
+            weight_decay=5e-4,
+            nesterov=True,
+        )
         self.layer, self.optimizer = self.fabric.setup(
             self.layer, self.optimizer)
 
     def supports_batch_training(self) -> bool:
         return True
 
+    def _l1_penalty(self) -> float:
+        return torch.norm(self.layer.weight, p=1)
+
     def fit(self, dataloader: DataLoader) -> int:
         dataloader = self.fabric.setup_dataloaders(dataloader)
         self.layer.train()
         best_loss = np.inf
         iter_no_change = 0
+
+        conv_iter = self.max_iter
         for iter in trange(
-                self.max_iter, 
-                leave=False, 
-                desc=f'Prune weight fitting', 
-                dynamic_ncols=True):
+            self.max_iter, leave=False, desc="Prune weight fitting", dynamic_ncols=True
+        ):
             sumloss = 0.0
             numlossitems = 0
-            pbar_prune = tqdm(dataloader, leave=False, dynamic_ncols=True)
-            for idx, (X, Y) in enumerate(pbar_prune):
-                pbar_prune.set_description(f'Pruning weights/{idx}')
-                num_items = X.shape[0]
-                for idx in range(num_items):
-                    output = self.layer(X[idx])
-                    label = Y[idx].view(-1)
-                    loss = 0.5 * F.mse_loss(output, label, reduction='sum')
-                    self.fabric.backward(loss)
-                    self.optimizer.step()
-                    self.optimizer.zero_grad(set_to_none=True)
-                    sumloss += loss.item()
-                    numlossitems += 1
+            for X, Y in tqdm(dataloader, leave=False, dynamic_ncols=True):
+                outputs = self.layer(X)
+                Y = Y.view(outputs.size())
+                loss = (
+                    0.5 * F.mse_loss(outputs, Y, reduction="mean")
+                    + self.l1_regularization_coeff * self._l1_penalty()
+                )
+                self.fabric.backward(loss)
+                self.optimizer.step()
+                self.optimizer.zero_grad(set_to_none=True)
+                sumloss += loss.item()
+                numlossitems += 1
             total_loss = torch.tensor([sumloss])
-            total_loss = self.fabric.all_reduce(total_loss, reduce_op='sum')
+            total_loss = self.fabric.all_reduce(total_loss, reduce_op="sum")
             num_loss = torch.tensor([numlossitems])
-            num_loss = self.fabric.all_reduce(num_loss, reduce_op='sum')
+            num_loss = self.fabric.all_reduce(num_loss, reduce_op="sum")
             num_items = num_loss.item()
             loss = total_loss.item() / num_items
             if loss > (best_loss - self.loss_tol):
@@ -140,20 +149,23 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
             if loss < best_loss:
                 best_loss = loss
             if iter_no_change >= self.num_iter_no_change:
-                return iter + 1
-        return self.max_iter
+                conv_iter = iter + 1
+                break
+        prune.l1_unstructured(
+            self.layer.module, name="weight", amount=self.prune_amount
+        )
+        return conv_iter
 
     @torch.no_grad()
     def get_non_zero_weights(self) -> torch.Tensor:
-        mask = self.layer.weight
-        mask = torch.all(mask == 0, dim=0)
-        return torch.where(mask, 0, 1)
+        return torch.flatten(self.layer.weight_mask)
 
 
 def get_causal_weights_trainer(
-        config: CausalWeightsTrainerConfig, *args) -> CausalWeightsTrainer:
-    if config.backend == 'sklearn':
+    config: CausalWeightsTrainerConfig, *args
+) -> CausalWeightsTrainer:
+    if config.backend == "sklearn":
         return CausalWeightsTrainerSklearn(config)
-    elif config.backend == 'torch':
+    elif config.backend == "torch":
         return CausalWeightsTrainerTorch(config, *args)
-    raise NotImplementedError('Unsupported backed for CausalWeightsTrainer')
+    raise NotImplementedError("Unsupported backed for CausalWeightsTrainer")
