@@ -1,7 +1,7 @@
-import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.models import (
+    resnet18,
     resnet50,
     ResNet50_Weights,
 )
@@ -10,19 +10,24 @@ from torchvision.models import (
 class BasicBlock(nn.Module):
     expansion = 1
 
-    def __init__(self, in_planes, planes, stride=1):
+    def __init__(self, in_planes: int, planes: int, stride: int = 1):
         super(BasicBlock, self).__init__()
         self.conv1 = nn.Conv2d(
-            in_planes, planes, kernel_size=3, stride=stride, padding=1,
-            bias=True)
-        self.conv2 = nn.Conv2d(planes, planes, kernel_size=3,
-                               stride=1, padding=1, bias=True)
+            in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=True
+        )
+        self.conv2 = nn.Conv2d(
+            planes, planes, kernel_size=3, stride=1, padding=1, bias=True
+        )
 
         self.shortcut = nn.Sequential()
         if stride != 1 or in_planes != self.expansion * planes:
             self.shortcut = nn.Conv2d(
-                in_planes, self.expansion * planes, kernel_size=1,
-                stride=stride, bias=True)
+                in_planes,
+                self.expansion * planes,
+                kernel_size=1,
+                stride=stride,
+                bias=True,
+            )
 
     def forward(self, x):
         out = F.relu(self.conv1(x))
@@ -33,18 +38,26 @@ class BasicBlock(nn.Module):
 
 
 class ResNet(nn.Module):
-    def __init__(self,
-                 block: nn.Module,
-                 num_blocks: list[int],
-                 num_classes: int,
-                 num_channels: int,
-                 kernel: int,
-                 stride: int,
-                 padding: int):
+    def __init__(
+        self,
+        block: nn.Module,
+        num_blocks: list[int],
+        num_classes: int,
+        num_channels: int,
+        kernel: int,
+        stride: int,
+        padding: int,
+    ):
         super().__init__()
         self.in_planes = 64
-        self.conv1 = nn.Conv2d(num_channels, self.in_planes, kernel_size=kernel,
-                               stride=stride, padding=padding, bias=True)
+        self.conv1 = nn.Conv2d(
+            num_channels,
+            self.in_planes,
+            kernel_size=kernel,
+            stride=stride,
+            padding=padding,
+            bias=True,
+        )
         self.layer1 = self._make_layer(block, 64, num_blocks[0], stride=1)
         self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2)
         self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2)
@@ -72,14 +85,12 @@ class ResNet(nn.Module):
 
 
 def ResNet18(
-        num_classes: int,
-        num_channels: int,
-        kernel: int,
-        stride: int,
-        padding: int) -> nn.Module:
+    num_classes: int, num_channels: int, kernel: int, stride: int, padding: int
+) -> nn.Module:
     return ResNet(
-        BasicBlock, [2, 2, 2, 2], num_classes, num_channels,
-        kernel, stride, padding)
+        BasicBlock, [
+            2, 2, 2, 2], num_classes, num_channels, kernel, stride, padding
+    )
 
 
 def initialize_model_weights(model: nn.Module) -> nn.Module:
@@ -95,37 +106,58 @@ def initialize_model_weights(model: nn.Module) -> nn.Module:
     return model
 
 
+# def get_resnet18(dataset: str) -> nn.Module:
+#     dataset = dataset.lower()
+#     if dataset == "cifar10":
+#         model = ResNet18(num_classes=10, num_channels=3,
+#                          kernel=3, stride=1, padding=1)
+#         model = initialize_model_weights(model)
+#         return model
+#     elif dataset == "fashionmnist":
+#         model = ResNet18(num_classes=10, num_channels=1,
+#                          kernel=3, stride=1, padding=1)
+#         model = initialize_model_weights(model)
+#         return model
+#     elif dataset == "tinyimagenet":
+#         model = ResNet18(num_classes=200, num_channels=3,
+#                          kernel=3, stride=1, padding=1)
+#         model = initialize_model_weights(model)
+#         return model
+#     raise NotImplementedError(f"Resnet18 is not available for {dataset}")
+
+
 def get_resnet18(dataset: str) -> nn.Module:
     dataset = dataset.lower()
-    if dataset == 'cifar10':
-        model = ResNet18(num_classes=10, num_channels=3,
-                         kernel=3, stride=1, padding=1)
-        model = initialize_model_weights(model)
+    if dataset == "cifar10":
+        model = resnet18(weights=None, num_classes=10)
+        model.conv1 = nn.Conv2d(
+            3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False
+        )
+        model.maxpool = nn.Identity()
         return model
-    elif dataset == 'fashionmnist':
-        model = ResNet18(num_classes=10, num_channels=1,
-                         kernel=3, stride=1, padding=1)
-        model = initialize_model_weights(model)
+    elif dataset == "tinyimagenet":
+        model = resnet18(weights=None, num_classes=200)
+        model.conv1 = nn.Conv2d(
+            3, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False
+        )
+        model.maxpool = nn.Identity()
         return model
-    elif dataset == 'tinyimagenet':
-        model = ResNet18(num_classes=200, num_channels=3,
-                         kernel=3, stride=1, padding=1)
-        model = initialize_model_weights(model)
-        return model
-    raise NotImplementedError(f'Resnet18 is not available for {dataset}')
+    raise NotImplementedError(f"Resnet18 is not available for {dataset}")
 
 
 def get_resnet50(dataset: str) -> nn.Module:
     dataset = dataset.lower()
-    if dataset == 'imagenet':
+    if dataset == "imagenet":
         model = resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
         return model
-    raise NotImplementedError(f'Resnet50 is not available for {dataset}')
+    raise NotImplementedError(f"Resnet50 is not available for {dataset}")
+
 
 def get_resnet50_untrained(dataset: str) -> nn.Module:
     dataset = dataset.lower()
-    if dataset == 'imagenet':
+    if dataset == "imagenet":
         model = resnet50()
         model = initialize_model_weights(model)
         return model
-    raise NotImplementedError(f'Resnet50 (untrained) is not available for {dataset}')
+    raise NotImplementedError(
+        f"Resnet50 (untrained) is not available for {dataset}")
