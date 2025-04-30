@@ -2,8 +2,7 @@
 import os
 import sys
 
-sys.path.insert(
-    0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
 
 # autopep: on
 
@@ -11,197 +10,170 @@ import argparse
 import os
 from tqdm.auto import tqdm
 
+from lightning.fabric import Fabric
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
 from torch.utils.data import DataLoader
-from torcheval.metrics import MulticlassAccuracy
+import torchmetrics
 
-from causalpruner import (
-    Pruner,
-    best_device,
-)
+from causalpruner import Pruner
 from models import get_model
 from datasets import get_dataset
+from test_utils import (
+    EvalMetrics,
+    MetricsComputer,
+)
+
 
 @torch.no_grad
-def load_model(model: nn.Module, path: str):
+def load_model(fabric: Fabric, model: nn.Module, path: str) -> bool:
     if not os.path.exists(path):
-        print(f'Model not found at {path}')
-        return
-    Pruner.apply_identity_masks_to_model(model)
-    print(f'Model loaded from {path}')
-    model.load_state_dict(torch.load(path))
-
-
-def train_model(model: nn.Module,
-                trainloader: DataLoader,
-                testloader: DataLoader,
-                lr: float,
-                num_epochs: int,
-                num_batches: int,
-                device: torch.device):
-    tqdm.write('Training model')
-    model.train()
-    optimizer = optim.Adam(model.parameters(), lr=lr)
-    if num_batches < 0:
-        num_batches = len(trainloader)
-    epoch_pbar = tqdm(total=num_epochs, leave=False)
-    for epoch in range(num_epochs):
-        epoch_pbar.update(1)
-        batch_pbar = tqdm(total=num_batches, leave=False)
-        for idx, data in enumerate(trainloader):
-            batch_pbar.update(1)
-            inputs, labels = data
-            inputs = inputs.to(device, non_blocking=True)
-            labels = labels.to(device, non_blocking=True)
-            outputs = model(inputs)
-            loss = F.cross_entropy(outputs, labels)
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad(set_to_none=True)
-            if idx >= num_batches:
-                break
-        batch_pbar.close()
-        accuracy = eval_model(model, testloader, device)
-        epoch_pbar.set_description(f'Epoch: {epoch + 1}; '
-                                   f'Accuracy: {accuracy:.4f}')
-    epoch_pbar.close()
+        return False
+    try:
+        fabric.load(path, {"model": model})
+    except:
+        Pruner.apply_identity_masks_to_model(model)
+        fabric.load(path, {"model": model})
+    return True
 
 
 @torch.no_grad
-def eval_model(model: nn.Module,
-               testloader: DataLoader,
-               device: torch.device) -> float:
+def eval_model(
+    fabric: Fabric, model: nn.Module, testloader: DataLoader, num_classes: int
+) -> tuple[float, EvalMetrics]:
     model.eval()
-    accuracy = MulticlassAccuracy().to(device)
+    metrics_computer = MetricsComputer(num_classes).to(fabric.device)
+    val_accuracy = torchmetrics.Accuracy(task="multiclass", num_classes=num_classes).to(
+        fabric.device
+    )
     for data in tqdm(testloader, leave=False):
         inputs, labels = data
-        inputs = inputs.to(device, non_blocking=True)
-        labels = labels.to(device, non_blocking=True)
         outputs = model(inputs)
-        accuracy.update(outputs, labels)
-    accuracy = accuracy.compute().item()
-    return accuracy
+        metrics_computer.add(outputs, labels)
+        val_accuracy(outputs, labels)
+    return (val_accuracy.compute(), metrics_computer.compute())
 
 
 @torch.no_grad
 def print_prune_stats(model: nn.Module):
-    tqdm.write('\n======================================================\n')
+    tqdm.write("\n======================================================\n")
     all_params_total = 0
     all_params_pruned = 0
-    for (name, param) in model.named_buffers():
-        name = name.rstrip('.weight_mask')
+    for name, param in model.named_buffers():
+        name = name.rstrip(".weight_mask")
         non_zero = torch.count_nonzero(param)
         total = torch.count_nonzero(torch.ones_like(param))
         all_params_total += total
         pruned = total - non_zero
         all_params_pruned += pruned
         percent = 100 * pruned / total
-        tqdm.write(f'Name: {name}; Total: {total}; '
-                  f'non-zero: {non_zero}; pruned: {pruned}; '
-                  f'percent: {percent:.2f}%')
+        tqdm.write(
+            f"Name: {name}; Total: {total}; "
+            f"non-zero: {non_zero}; pruned: {pruned}; "
+            f"percent: {percent:.2f}%"
+        )
     all_params_non_zero = all_params_total - all_params_pruned
-    all_params_percent = 100 * all_params_pruned / \
-        (all_params_total + 1e-6)
-    tqdm.write(f'Name: All; Total: {all_params_total}; '
-               f'non-zero: {all_params_non_zero}; '
-               f'pruned: {all_params_pruned}; '
-               f'percent: {all_params_percent:.2f}%')
-    tqdm.write('\n======================================================\n')
+    all_params_percent = 100 * all_params_pruned / (all_params_total + 1e-6)
+    tqdm.write(
+        f"Name: All; Total: {all_params_total}; "
+        f"non-zero: {all_params_non_zero}; "
+        f"pruned: {all_params_pruned}; "
+        f"percent: {all_params_percent:.2f}%"
+    )
+    tqdm.write("\n======================================================\n")
 
 
 def main(args: argparse.Namespace):
     print(args)
+
+    fabric = Fabric(devices=args.device_ids, accelerator="auto")
+    fabric.launch()
+
     model_name = args.model
     dataset_name = args.dataset
     dataset_root_dir = args.dataset_root_dir
     model_checkpoint = args.model_checkpoint
-    device = best_device(args.device_id)
 
     train_dataset, test_dataset, _ = get_dataset(
-        dataset_name, model_name, data_root_dir=dataset_root_dir)
+        dataset_name, model_name, data_root_dir=dataset_root_dir
+    )
     testloader = DataLoader(
-        test_dataset, batch_size=args.batch_size,
-        shuffle=args.shuffle, pin_memory=True,
-        num_workers=args.num_workers,
-        persistent_workers=args.num_workers > 0)
-    
+        test_dataset,
+        batch_size=args.batch_size,
+        pin_memory=True,
+        num_workers=args.num_dataset_workers,
+        persistent_workers=args.num_dataset_workers > 0,
+    )
+    testloader = fabric.setup_dataloaders(testloader)
+
     model = get_model(model_name, dataset_name)
-    if model_checkpoint != '':
-        load_model(model, model_checkpoint)
-    model = model.to(device)
+    model = fabric.setup(model)
+    if not load_model(fabric, model, model_checkpoint):
+        tqdm.write(f"Model does not exist at {model_checkpoint}")
+        return
+    tqdm.write(f"Model loaded from {model_checkpoint}")
 
-    if args.train:
-        trainloader = DataLoader(train_dataset, batch_size=args.batch_size,
-                                 shuffle=args.shuffle, pin_memory=True, num_workers=args.num_workers,
-                                 persistent_workers=args.num_workers > 0)
-        train_model(model,
-                    trainloader,
-                    testloader,
-                    args.lr,
-                    args.num_train_epochs,
-                    args.num_train_batches,
-                    device)
-        if args.trained_model_checkpoint != '':
-            torch.save(model.state_dict(), args.trained_model_checkpoint)
+    val_accuracy, eval_metrics = eval_model(fabric, model, testloader, args.num_classes)
+    val_accuracy *= 100
 
-    accuracy = eval_model(model, testloader, device)
-
-    tqdm.write(f'Model: {model_name}')
-    tqdm.write(f'Dataset: {dataset_name}')
+    if not fabric.is_global_zero:
+        return
+    tqdm.write(f"Model: {model_name}")
+    tqdm.write(f"Dataset: {dataset_name}")
     print_prune_stats(model)
-    tqdm.write(f'Accuracy: {accuracy}')
+    tqdm.write("\n======================================================\n")
+    tqdm.write("Final eval metrics:")
+    tqdm.write(f"Total Accuracy: {val_accuracy:.2f}%")
+    tqdm.write(f"Accuracy: {eval_metrics.accuracy}")
+    tqdm.write(f"Precision: {eval_metrics.precision}")
+    tqdm.write(f"Recall: {eval_metrics.recall}")
+    tqdm.write(f"F1 Score: {eval_metrics.f1_score}")
+    tqdm.write("\n======================================================\n")
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description='Plot pruning graphs')
+    parser = argparse.ArgumentParser(description="Plot pruning graphs")
 
-    parser.add_argument('--model', type=str,
-                        choices=['lenet', 'alexnet', 'resnet18', 'resnet50'],
-                        help='Model name')
-    parser.add_argument('--dataset', type=str,
-                        choices=['cifar10', 'fashionmnist', 'imagenet',
-                        'tinyimagenet'],
-                        help='Dataset name')
-    parser.add_argument('--model_checkpoint',
-                        type=str, default='',
-                        help='Path to model checkpoint. Loads the checkpoint if model is given -- else uses the default version')
     parser.add_argument(
-        '--dataset_root_dir', type=str, default='../data',
-        help='Directory to download datasets')
-    parser.add_argument('--device_id',
-                        type=int,
-                        default=0,
-                        help='The device id. Useful for multi device systems')
+        "--model",
+        type=str,
+        choices=["lenet", "alexnet", "resnet18", "resnet50"],
+        help="Model name",
+    )
     parser.add_argument(
-        '--num_workers', type=int, default=4,
-        help='Number of dataset workers')
+        "--dataset",
+        type=str,
+        choices=["cifar10", "fashionmnist", "imagenet", "tinyimagenet"],
+        help="Dataset name",
+    )
     parser.add_argument(
-        '--shuffle', action=argparse.BooleanOptionalAction,
-        default=True,
-        help='Whether to shuffle the test datasets')
-    parser.add_argument('--batch_size', type=int,
-                        default=256, help='Batch size')
+        "--model_checkpoint",
+        type=str,
+        default="",
+        help="Path to model checkpoint. Loads the checkpoint if model is given -- else uses the default version",
+    )
     parser.add_argument(
-        '--train', action=argparse.BooleanOptionalAction,
-        default=False,
-        help='Whether to train the model before evaling')
-    parser.add_argument('--trained_model_checkpoint',
-                        type=str, default='',
-                        help='Path to write trained model checkpoint. Used if not empty')
-    parser.add_argument('--num_train_batches',
-                        type=int, default=-1,
-                        help='Controls the number of train batches. Set to a positive value to limit training to a subset of the dataset')
-    parser.add_argument('--num_train_epochs', type=int, default=1,
-                        help='Number of training epochs')
-    parser.add_argument('--lr', type=float, default=3e-4,
-                        help='Training optimizer learning rate')
-
+        "--dataset_root_dir",
+        type=str,
+        default="../data",
+        help="Directory to download datasets",
+    )
+    parser.add_argument(
+        "--device_ids",
+        type=str,
+        default="-1",
+        help="The device id. Useful for multi device systems",
+    )
+    parser.add_argument(
+        "--num_dataset_workers", type=int, default=4, help="Number of dataset workers"
+    )
+    parser.add_argument(
+        "--num_classes", type=int, default=10, help="Number of classes in the data"
+    )
+    parser.add_argument("--batch_size", type=int, default=512, help="Batch size")
     return parser.parse_args()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     args = parse_args()
     main(args)

@@ -87,7 +87,8 @@ def main(args):
             + f"{args.num_prune_epochs}"
         )
         alpha_id = f"{args.causal_pruner_l1_regularization_coeff}"
-        prune_identifier += f"_{iteration_id}_{alpha_id}"
+        prune_amount = f"{args.total_prune_amount}"
+        prune_identifier += f"_{iteration_id}_{alpha_id}_{prune_amount}"
     elif prune_identifier == "magpruner":
         prune_identifier += f"_{args.total_prune_amount}"
     identifier = f"{model_name}_{dataset_name}_{prune_identifier}"

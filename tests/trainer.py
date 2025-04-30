@@ -15,6 +15,11 @@ import torchmetrics
 from tqdm.auto import tqdm
 
 from causalpruner import Pruner
+from test_utils import (
+    AverageMeter,
+    EvalMetrics,
+    MetricsComputer,
+)
 
 
 @dataclass
@@ -95,79 +100,13 @@ class TrainerConfig:
     model_to_save_after_training: str = "trained"
 
 
-class AverageMeter:
-    def __init__(self):
-        self.reset()
-
-    def reset(self):
-        self.val = 0.0
-        self.avg = 0.0
-        self.sum = 0.0
-        self.count = 0
-
-    def update(self, val, n=1):
-        self.val = val
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count
-
-
-@dataclass
-class EvalMetrics:
-    accuracy: torch.Tensor
-    precision: torch.Tensor
-    recall: torch.Tensor
-    f1_score: torch.Tensor
-
-
-class MetricsComputer:
-    def __init__(self, num_classes: int):
-        self.num_classes = num_classes
-        self.accuracy = torchmetrics.Accuracy(
-            task="multiclass", num_classes=num_classes, average="none"
-        )
-        self.precision = torchmetrics.Precision(
-            task="multiclass", num_classes=num_classes, average="none"
-        )
-        self.recall = torchmetrics.Recall(
-            task="multiclass", num_classes=num_classes, average="none"
-        )
-        self.f1_score = torchmetrics.F1Score(
-            task="multiclass", num_classes=num_classes, average="none"
-        )
-
-    def to(self, device: torch.device) -> "MetricsComputer":
-        self.accuracy.to(device)
-        self.precision.to(device)
-        self.recall.to(device)
-        self.f1_score.to(device)
-        return self
-
-    def reset(self) -> "MetricsComputer":
-        self.accuracy.reset()
-        self.precision.reset()
-        self.recall.reset()
-        self.f1_score.reset()
-        return self
-
-    def add(self, logits: torch.Tensor, labels: torch.Tensor):
-        self.accuracy(logits, labels)
-        self.precision(logits, labels)
-        self.recall(logits, labels)
-        self.f1_score(logits, labels)
-
-    def compute(self) -> EvalMetrics:
-        return EvalMetrics(
-            accuracy=self.accuracy.compute(),
-            precision=self.precision.compute(),
-            recall=self.recall.compute(),
-            f1_score=self.f1_score.compute(),
-        )
-
-
 def set_optimizer_lr(optimizer: optim.Optimizer, new_lr: float):
     for param_group in optimizer.param_groups:
         param_group["lr"] = new_lr
+
+
+def get_optimizer_lr(optimizer: optim.Optimizer) -> float:
+    return optimizer.param_groups[0]["lr"]
 
 
 class Trainer:
@@ -475,21 +414,12 @@ class Trainer:
 
         return best_lr
 
-    def create_one_cycle_lr_scheduler(self, min_lr, max_lr):
-        optimizer = self.config.train_optimizer
-        if not isinstance(optimizer, optim.SGD):
-            return
+    def create_one_cycle_lr_scheduler(self, max_lr: float):
         total_steps = self._calculate_total_steps()
         self.lr_scheduler = optim.lr_scheduler.OneCycleLR(
             self.config.train_optimizer,
             max_lr=max_lr,
             total_steps=total_steps,
-            pct_start=0.1,
-            div_factor=max_lr / min_lr,
-            final_div_factor=max_lr
-            / (min_lr * 0.0001),  # final_lr = initial_lr/final_div_factor
-            anneal_strategy="cos",
-            three_phase=False,
         )
 
     def _run_training(self):
@@ -499,12 +429,14 @@ class Trainer:
         if config.lrrt_config.enable:
             max_lr = self._run_lrrt()
         else:
-            max_lr = config.train_optimizer.param_groups[0]["lr"]
+            max_lr = get_optimizer_lr(config.train_optimizer)
         min_lr = 0.1 * max_lr
-        set_optimizer_lr(config.train_optimizer, min_lr)
         if config.use_one_cycle_lr_scheduler:
-            self.create_one_cycle_lr_scheduler(min_lr, max_lr)
-        print(f"Setting learning rate: {config.train_optimizer.param_groups[0]['lr']}")
+            set_optimizer_lr(config.train_optimizer, min_lr)
+            self.create_one_cycle_lr_scheduler(max_lr)
+        else:
+            set_optimizer_lr(config.train_optimizer, max_lr)
+        print(f"Setting learning rate: {get_optimizer_lr(config.train_optimizer):.1e}")
         epoch_config = self.epoch_config
         num_batches_in_epoch = epoch_config.num_batches_in_epoch
         tqdm_update_frequency = epoch_config.tqdm_update_frequency
