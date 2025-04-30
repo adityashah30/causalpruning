@@ -436,7 +436,9 @@ class Trainer:
             self.create_one_cycle_lr_scheduler(max_lr)
         else:
             set_optimizer_lr(config.train_optimizer, max_lr)
-        print(f"Setting learning rate: {get_optimizer_lr(config.train_optimizer):.1e}")
+        tqdm.write(
+            f"Setting learning rate: {get_optimizer_lr(config.train_optimizer):.1e}"
+        )
         epoch_config = self.epoch_config
         num_batches_in_epoch = epoch_config.num_batches_in_epoch
         tqdm_update_frequency = epoch_config.tqdm_update_frequency
