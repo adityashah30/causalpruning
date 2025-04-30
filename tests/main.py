@@ -60,9 +60,7 @@ def get_train_optimizer(name: str, model: nn.Module, lr: float) -> optim.Optimiz
     elif name == "sgd":
         return optim.SGD(model.parameters(), lr=lr)
     elif name == "sgd_momentum":
-        return optim.SGD(
-            model.parameters(), lr=lr, momentum=0.9, nesterov=True, weight_decay=1e-4
-        )
+        return optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=5e-4)
     raise NotImplementedError(f"{name} is not a supported post-prune Optimizier")
 
 
@@ -91,7 +89,7 @@ def main(args):
         alpha_id = f"{args.causal_pruner_l1_regularization_coeff}"
         prune_identifier += f"_{iteration_id}_{alpha_id}"
     elif prune_identifier == "magpruner":
-        prune_identifier += f"_{args.mag_pruner_amount}"
+        prune_identifier += f"_{args.total_prune_amount}"
     identifier = f"{model_name}_{dataset_name}_{prune_identifier}"
     suffix = args.suffix
     if suffix != "":
@@ -107,7 +105,6 @@ def main(args):
         dataset_name,
         model_name,
         args.dataset_root_dir,
-        cache_size_limit_gb=args.dataset_cache_size_limit_gb,
     )
     fabric = Fabric(devices=args.device_ids, accelerator="auto")
     fabric.launch()
@@ -212,7 +209,7 @@ def main(args):
                 start_clean=args.start_clean,
                 eval_after_epoch=args.eval_after_epoch,
                 reset_weights=args.reset_weights_after_pruning,
-                prune_amount=args.mag_pruner_amount,
+                prune_amount=prune_amount_per_iteration,
             )
         pruner = get_pruner(pruner_config)
     trainer = Trainer(trainer_config, pruner)
@@ -263,7 +260,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max_train_epochs",
         type=int,
-        default=200,
+        default=300,
         help="Maximum number of epochs for train the model",
     )
     parser.add_argument(
@@ -354,12 +351,6 @@ def parse_args() -> argparse.Namespace:
         help="Whether to shuffle the train and test datasets",
     )
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size")
-    parser.add_argument(
-        "--dataset_cache_size_limit_gb",
-        type=int,
-        default=16,
-        help="Size limit for dataset stochastic cache",
-    )
     # Dirs
     parser.add_argument(
         "--checkpoint_dir",
@@ -454,7 +445,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--causal_pruner_l1_regularization_coeff",
         type=float,
-        default=1e-3,
+        default=0,
         help="Causal Pruner L1 regularization coefficient",
     )
     parser.add_argument(
@@ -490,7 +481,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--causal_pruner_pin_memory",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
         help="Controls if the causal pruner dataloader uses pinned memory.",
     )
     parser.add_argument(
