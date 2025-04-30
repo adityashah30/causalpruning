@@ -39,7 +39,7 @@ class TinyImageNet(ImageFolder):
 
 @torch.no_grad
 def get_tiny_imagenet(
-    model_name: str, data_root_dir: str, cache_size_limit_gb: int
+    model_name: str, data_root_dir: str
 ) -> tuple[data.Dataset, data.Dataset]:
     model_name = model_name.lower()
     tinyimagenet_root_dir = os.path.join(data_root_dir, "tinyimagenet200")
