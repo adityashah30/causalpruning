@@ -92,6 +92,7 @@ class TrainerConfig:
     epoch_config: EpochConfig
     tensorboard_dir: str
     checkpoint_dir: str
+    max_train_lr: float
     use_one_cycle_lr_scheduler: bool = False
     loss_fn: Callable = F.cross_entropy
     verbose: bool = True
@@ -426,16 +427,12 @@ class Trainer:
         self._load_model(self.config.model_to_load_for_training)
         self.config.train_optimizer.load_state_dict(self.train_optimizer_init_state)
         config = self.config
+        max_lr = config.max_train_lr
         if config.lrrt_config.enable:
-            max_lr = self._run_lrrt()
-        else:
-            max_lr = get_optimizer_lr(config.train_optimizer)
-        min_lr = 0.1 * max_lr
-        if config.use_one_cycle_lr_scheduler:
-            set_optimizer_lr(config.train_optimizer, min_lr)
-            self.create_one_cycle_lr_scheduler(max_lr)
-        else:
+            max_lr = min(self._run_lrrt(), max_lr)
             set_optimizer_lr(config.train_optimizer, max_lr)
+        if config.use_one_cycle_lr_scheduler:
+            self.create_one_cycle_lr_scheduler(max_lr)
         tqdm.write(
             f"Setting learning rate: {get_optimizer_lr(config.train_optimizer):.1e}"
         )

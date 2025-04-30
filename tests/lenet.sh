@@ -1,35 +1,50 @@
 mkdir -p ../checkpoints
 mkdir -p ../tensorboard
 
-# Fashion-MNIST
-# uv run main.py --model=lenet --dataset=fashionmnist --no-prune
-
-# uv run main.py --model=lenet --dataset=fashionmnist --prune \
-#     --pruner=causalpruner --causal_pruner_l1_regularization_coeff=1e-14
-
-# uv run main.py --model=lenet --dataset=fashionmnist --prune \
-#     --pruner=magpruner --mag_pruner_amount=0.1
-
 # CIFAR10
+
+# No pruning
 uv run main.py --model=lenet --dataset=cifar10 --no-prune \
-  --train_optimizer=sgd_momentum \
-  --train_convergence_loss_tolerance=-100
+  --train_lr=1e-3 --max_train_lr=0.1 --no-run_lrrt
+
+# Causal Pruning
+uv run main.py --model=lenet --dataset=cifar10 --prune \
+  --train_lr=1e-3 --max_train_lr=0.1 --no-run_lrrt \
+  --pruner=causalpruner --total_prune_amount=0.1
 
 uv run main.py --model=lenet --dataset=cifar10 --prune \
-  --pruner=causalpruner --causal_pruner_l1_regularization_coeff=1e-12 \
-  --train_optimizer=sgd_momentum \
-  --train_convergence_loss_tolerance=-100
+  --train_lr=1e-3 --max_train_lr=0.1 --no-run_lrrt \
+  --pruner=causalpruner --total_prune_amount=0.3
 
 uv run main.py --model=lenet --dataset=cifar10 --prune \
-  --pruner=magpruner --mag_pruner_amount=0.16 \
-  --train_optimizer=sgd_momentum \
-  --train_convergence_loss_tolerance=-100
+  --train_lr=1e-3 --max_train_lr=0.1 --no-run_lrrt \
+  --pruner=causalpruner --total_prune_amount=0.5
 
-# TinyImageNet
-# uv run main.py --model=lenet --dataset=tinyimagenet --no-prune
+uv run main.py --model=lenet --dataset=cifar10 --prune \
+  --train_lr=1e-3 --max_train_lr=0.1 --no-run_lrrt \
+  --pruner=causalpruner --total_prune_amount=0.7
 
-# uv run main.py --model=lenet --dataset=tinyimagenet --prune \
-#     --pruner=causalpruner --causal_pruner_l1_regularization_coeff=1e-14
+uv run main.py --model=lenet --dataset=cifar10 --prune \
+  --train_lr=1e-3 --max_train_lr=0.1 --no-run_lrrt \
+  --pruner=causalpruner --total_prune_amount=0.9
 
-# uv run main.py --model=lenet --dataset=tinyimagenet --prune \
-#     --pruner=magpruner --mag_pruner_amount=0.275
+# Iterative Magnitude Pruning
+uv run main.py --model=lenet --dataset=cifar10 --prune \
+  --train_lr=1e-3 --max_train_lr=0.1 --no-run_lrrt \
+  --pruner=magpruner --total_prune_amount=0.1
+
+uv run main.py --model=lenet --dataset=cifar10 --prune \
+  --train_lr=1e-3 --max_train_lr=0.1 --no-run_lrrt \
+  --pruner=magpruner --total_prune_amount=0.3
+
+uv run main.py --model=lenet --dataset=cifar10 --prune \
+  --train_lr=1e-3 --max_train_lr=0.1 --no-run_lrrt \
+  --pruner=magpruner --total_prune_amount=0.5
+
+uv run main.py --model=lenet --dataset=cifar10 --prune \
+  --train_lr=1e-3 --max_train_lr=0.1 --no-run_lrrt \
+  --pruner=magpruner --total_prune_amount=0.7
+
+uv run main.py --model=lenet --dataset=cifar10 --prune \
+  --train_lr=1e-3 --max_train_lr=0.1 --no-run_lrrt \
+  --pruner=magpruner --total_prune_amount=0.9

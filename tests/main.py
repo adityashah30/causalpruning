@@ -166,6 +166,7 @@ def main(args):
         model_to_load_for_training=args.model_to_load_for_training,
         model_to_save_after_training=args.model_to_save_after_training,
         use_one_cycle_lr_scheduler=args.use_one_cycle_lr_scheduler,
+        max_train_lr=args.max_train_lr,
     )
     pruner = None
     if args.prune:
@@ -278,6 +279,12 @@ def parse_args() -> argparse.Namespace:
         help="Learning rate for the train optimizer",
     )
     parser.add_argument(
+        "--max_train_lr",
+        type=float,
+        default=0.1,
+        help="Maximum training learning rate to with OneCycleLR",
+    )
+    parser.add_argument(
         "--use_one_cycle_lr_scheduler",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -286,7 +293,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--run_lrrt",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
         help="Runs the Learning Rate Range Finder test if enabled",
     )
     parser.add_argument(

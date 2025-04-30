@@ -1,30 +1,50 @@
 mkdir -p ../checkpoints
 mkdir -p ../tensorboard
 
-# Fashion-MNIST
-uv run main.py --model=alexnet --dataset=fashionmnist --no-prune
-
-uv run main.py --model=alexnet --dataset=fashionmnist --prune \
-    --pruner=causalpruner --causal_pruner_l1_regularization_coeff=1e-17
-
-uv run main.py --model=alexnet --dataset=fashionmnist --prune \
-    --pruner=magpruner --mag_prune_amount=0.275
-
 # CIFAR10
-uv run main.py --model=alexnet --dataset=cifar10 --no-prune
+
+# No pruning
+uv run main.py --model=alexnet --dataset=cifar10 --no-prune \
+  --train_lr=1e-3 --max_train_lr=0.1 --no-run_lrrt
+
+# Causal Pruning
+uv run main.py --model=alexnet --dataset=cifar10 --prune \
+  --train_lr=1e-3 --max_train_lr=0.1 --no-run_lrrt \
+  --pruner=causalpruner --total_prune_amount=0.1
 
 uv run main.py --model=alexnet --dataset=cifar10 --prune \
-    --pruner=causalpruner --causal_pruner_l1_regularization_coeff=1e-16
+  --train_lr=1e-3 --max_train_lr=0.1 --no-run_lrrt \
+  --pruner=causalpruner --total_prune_amount=0.3
 
 uv run main.py --model=alexnet --dataset=cifar10 --prune \
-    --pruner=magpruner --mag_prune_amount=0.275
+  --train_lr=1e-3 --max_train_lr=0.1 --no-run_lrrt \
+  --pruner=causalpruner --total_prune_amount=0.5
 
+uv run main.py --model=alexnet --dataset=cifar10 --prune \
+  --train_lr=1e-3 --max_train_lr=0.1 --no-run_lrrt \
+  --pruner=causalpruner --total_prune_amount=0.7
 
-# TinyImageNet
-uv run main.py --model=alexnet --dataset=tinyimagenet --no-prune
+uv run main.py --model=alexnet --dataset=cifar10 --prune \
+  --train_lr=1e-3 --max_train_lr=0.1 --no-run_lrrt \
+  --pruner=causalpruner --total_prune_amount=0.9
 
-uv run main.py --model=alexnet --dataset=tinyimagenet --prune \
-    --pruner=causalpruner --causal_pruner_l1_regularization_coeff=1e-16
+# Iterative Magnitude Pruning
+uv run main.py --model=alexnet --dataset=cifar10 --prune \
+  --train_lr=1e-3 --max_train_lr=0.1 --no-run_lrrt \
+  --pruner=magpruner --total_prune_amount=0.1
 
-uv run main.py --model=alexnet --dataset=tinyimagenet --prune \
-    --pruner=magpruner --mag_prune_amount=0.196
+uv run main.py --model=alexnet --dataset=cifar10 --prune \
+  --train_lr=1e-3 --max_train_lr=0.1 --no-run_lrrt \
+  --pruner=magpruner --total_prune_amount=0.3
+
+uv run main.py --model=alexnet --dataset=cifar10 --prune \
+  --train_lr=1e-3 --max_train_lr=0.1 --no-run_lrrt \
+  --pruner=magpruner --total_prune_amount=0.5
+
+uv run main.py --model=alexnet --dataset=cifar10 --prune \
+  --train_lr=1e-3 --max_train_lr=0.1 --no-run_lrrt \
+  --pruner=magpruner --total_prune_amount=0.7
+
+uv run main.py --model=alexnet --dataset=cifar10 --prune \
+  --train_lr=1e-3 --max_train_lr=0.1 --no-run_lrrt \
+  --pruner=magpruner --total_prune_amount=0.9
