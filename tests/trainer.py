@@ -13,6 +13,9 @@ from torch.utils.data import DataLoader, Dataset
 from torch.utils.tensorboard import SummaryWriter
 import torchmetrics
 from tqdm.auto import tqdm
+from pruner.combined_pruner import CombinedPruner
+from pruner.mag_pruner import MagPruner
+from causalpruner.sgd_pruner import SGDPruner
 
 from causalpruner import Pruner
 from test_utils import (
@@ -234,7 +237,16 @@ class Trainer:
     def _run_prune(self):
         epoch_config = self.epoch_config
         self.pruner.start_pruning()
+        if isinstance(self.pruner, CombinedPruner):
+            # causal_it = self.pruner.config.phase_iterations["causal"]
+            # mag_it = self.pruner.config.phase_iterations["mag"]
+            first = self.pruner.config.order[0]
+            phase_change_it = self.pruner.config.phase_iterations[first]
         for iteration in range(epoch_config.num_prune_iterations):
+            #if iteration is == pruner1 iteration then we need to call the next phase function
+            if isinstance(self.pruner, CombinedPruner):
+                if (iteration == phase_change_it):
+                    self.pruner.next_phase()
             self._train_model_before_prune(iteration)
             self._run_prune_iteration(iteration)
             self._checkpoint_model(f"prune.{iteration}")
@@ -290,15 +302,26 @@ class Trainer:
         num_batches_in_epoch = epoch_config.num_batches_in_epoch
         tqdm_update_frequency = epoch_config.tqdm_update_frequency
         self.pruner.start_iteration()
+
+        phase_info = ""
+        if isinstance(self.pruner, CombinedPruner):
+            current_pruner, _ = self.pruner._current_phase()
+            if isinstance(current_pruner, MagPruner):
+                current_phase = "Magnitude"
+            elif isinstance(current_pruner, SGDPruner):
+                current_phase = "Causal"
+            phase_info = f" | {current_phase} |"
+
         for epoch in range(epoch_config.num_prune_epochs):
             self.global_step += 1
             self.pbar.update(1)
             config.model.train()
             loss_avg = AverageMeter()
+            
             pbar = tqdm(
                 self.trainloader,
                 leave=False,
-                desc=f"Prune epoch: {epoch}",
+                desc=f"Prune epoch: {epoch}{phase_info}",
                 dynamic_ncols=True,
             )
             for batch_counter, data in enumerate(pbar):
