@@ -28,6 +28,10 @@ from pruner.mag_pruner import (
     MagPruner,
     MagPrunerConfig,
 )
+from pruner.combined_pruner import (
+    CombinedPruner,
+    CombinedPrunerConfig,
+)
 from trainer import (
     DataConfig,
     EpochConfig,
@@ -69,6 +73,8 @@ def get_pruner(pruner_config: PrunerConfig) -> Pruner:
         return SGDPruner(pruner_config)
     elif isinstance(pruner_config, MagPrunerConfig):
         return MagPruner(pruner_config)
+    elif isinstance(pruner_config, CombinedPrunerConfig):
+        return CombinedPruner(pruner_config)
     raise NotImplementedError(f"{type(pruner_config)} is not supported yet")
 
 
@@ -96,6 +102,7 @@ def main(args):
     if suffix != "":
         identifier = f"{identifier}_{suffix}"
     checkpoint_dir = os.path.join(args.checkpoint_dir, identifier)
+    print(f"Checkpoint dir: {checkpoint_dir}")
     tensorboard_dir = os.path.join(args.tensorboard_dir, identifier)
     if args.train_only:
         args.start_clean = False
@@ -126,9 +133,13 @@ def main(args):
         shuffle=args.shuffle_dataset,
         num_classes=num_classes,
     )
+    phases = {}
+    for phase_def in args.pruning_phases.split(","):
+        name, iters = phase_def.split(":")
+        phases[name.strip()] = int(iters)
     epoch_config = EpochConfig(
         num_pre_prune_epochs=args.num_pre_prune_epochs if args.prune else 0,
-        num_prune_iterations=args.num_prune_iterations if args.prune else 0,
+        num_prune_iterations= sum(phases.values()) if (args.pruner == "combinedpruner" and args.prune) else args.num_prune_iterations if args.prune else 0,
         num_train_epochs_before_pruning=args.num_train_epochs_before_pruning
         if args.prune
         else 0,
@@ -212,6 +223,63 @@ def main(args):
                 eval_after_epoch=args.eval_after_epoch,
                 reset_weights=args.reset_weights_after_pruning,
                 prune_amount=prune_amount_per_iteration,
+            )
+        elif args.pruner == "combinedpruner":
+            phases = {}
+            for phase_def in args.pruning_phases.split(","):
+                name, iters = phase_def.split(":")
+                phases[name.strip()] = int(iters)
+            first, second = args.pruner_order.split(",")
+
+            causal_weights_trainer_config = CausalWeightsTrainerConfig(
+                fabric=fabric,
+                init_lr=args.causal_pruner_init_lr,
+                l1_regularization_coeff=args.causal_pruner_l1_regularization_coeff,
+                prune_amount=prune_amount_per_iteration,
+                max_iter=args.causal_pruner_max_iter,
+                loss_tol=args.causal_pruner_loss_tol,
+                num_iter_no_change=args.causal_pruner_num_iter_no_change,
+                backend=args.causal_pruner_backend,
+            )
+            causal_config=SGDPrunerConfig(
+                    fabric=fabric,
+                    model=model,
+                    pruner="SGDPruner",
+                    checkpoint_dir=checkpoint_dir,
+                    start_clean=False,
+                    eval_after_epoch=args.eval_after_epoch,
+                    reset_weights=args.reset_weights_after_pruning,
+                    batch_size=args.causal_pruner_batch_size,
+                    num_dataloader_workers=args.num_causal_pruner_dataloader_workers,
+                    pin_memory=args.causal_pruner_pin_memory,
+                    threaded_checkpoint_writer=args.causal_pruner_threaded_checkpoint_writer,
+                    delete_checkpoint_dir_after_training=args.delete_checkpoint_dir_after_training,
+                    trainer_config=causal_weights_trainer_config,
+                )
+            mag_config=MagPrunerConfig(
+                    fabric=fabric,
+                    model=model,
+                    pruner="MagPruner",
+                    checkpoint_dir=checkpoint_dir,
+                    start_clean=False,
+                    eval_after_epoch=args.eval_after_epoch,
+                    reset_weights=args.reset_weights_after_pruning,
+                    prune_amount=prune_amount_per_iteration,
+                )
+            pruner_config = CombinedPrunerConfig(
+                fabric=fabric,
+                model=model,
+                pruner="CombinedPruner",
+                checkpoint_dir=checkpoint_dir,
+                start_clean=args.start_clean,
+                eval_after_epoch=args.eval_after_epoch,
+                reset_weights=args.reset_weights_after_pruning,
+                phase_iterations=phases,
+                order=[first, second],
+                pruner_configs={
+                "causal": causal_config,
+                "mag": mag_config
+                },
             )
         pruner = get_pruner(pruner_config)
     trainer = Trainer(trainer_config, pruner)
@@ -424,7 +492,7 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="causalpruner",
         help="Method for pruning",
-        choices=["causalpruner", "magpruner"],
+        choices=["causalpruner", "magpruner", "combinedpruner"],
     )
     parser.add_argument(
         "--reset_weights_after_pruning",
@@ -517,6 +585,16 @@ def parse_args() -> argparse.Namespace:
         default=True,
         help="Output verbosity",
     )
+    parser.add_argument(
+        '--pruner_order',
+        type=str, 
+        default='causal,mag',
+        help='Comma-separated list of pruning phases (causal/mag)')
+    parser.add_argument(
+        '--pruning_phases',
+        type=str,
+        default="causal:3,mag:2",
+        help="Comma-separated list of phase:iterations pairs")
 
     return parser.parse_args()
 

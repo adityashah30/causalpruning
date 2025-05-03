@@ -122,6 +122,7 @@ class Pruner(ABC):
 
     @torch.no_grad()
     def start_pruning(self) -> None:
+        print(f"Init model path being saved to {self.init_model_path}")
         torch.save(self.config.model.state_dict(), self.init_model_path)
 
     @torch.no_grad()
