@@ -43,7 +43,7 @@ def get_tiny_imagenet(
 ) -> tuple[data.Dataset, data.Dataset]:
     model_name = model_name.lower()
     tinyimagenet_root_dir = os.path.join(data_root_dir, "tinyimagenet200")
-    if model_name == "lenet":
+    if model_name in ["lenet", "resnet18"]:
         train_transforms = v2.Compose(_DEFAULT_TRAIN_TRANSFORMS)
         test_transforms = v2.Compose(_DEFAULT_TEST_TRANSFORMS)
         train = TinyImageNet(
@@ -61,21 +61,8 @@ def get_tiny_imagenet(
         train_transforms = v2.Compose(
             [v2.Resize((224, 224))] + _DEFAULT_TRAIN_TRANSFORMS
         )
-        test_transforms = v2.Compose([v2.Resize((224, 224))] + _DEFAULT_TEST_TRANSFORMS)
-        train = TinyImageNet(
-            tinyimagenet_root_dir,
-            train=True,
-            transform=train_transforms,
-        )
-        test = TinyImageNet(
-            tinyimagenet_root_dir,
-            train=False,
-            transform=test_transforms,
-        )
-        return (train, test)
-    elif model_name == "resnet18":
-        train_transforms = v2.Compose([v2.Resize((32, 32))] + _DEFAULT_TRAIN_TRANSFORMS)
-        test_transforms = v2.Compose([v2.Resize((32, 32))] + _DEFAULT_TEST_TRANSFORMS)
+        test_transforms = v2.Compose(
+            [v2.Resize((224, 224))] + _DEFAULT_TEST_TRANSFORMS)
         train = TinyImageNet(
             tinyimagenet_root_dir,
             train=True,

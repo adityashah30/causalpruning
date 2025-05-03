@@ -24,6 +24,8 @@ from test_utils import (
     MetricsComputer,
 )
 
+torch.set_float32_matmul_precision("medium")
+
 
 @torch.no_grad
 def load_model(fabric: Fabric, model: nn.Module, path: str) -> bool:
@@ -94,7 +96,7 @@ def main(args: argparse.Namespace):
     dataset_root_dir = args.dataset_root_dir
     model_checkpoint = args.model_checkpoint
 
-    train_dataset, test_dataset, _ = get_dataset(
+    _, test_dataset, num_classes = get_dataset(
         dataset_name, model_name, data_root_dir=dataset_root_dir
     )
     testloader = DataLoader(
@@ -113,7 +115,7 @@ def main(args: argparse.Namespace):
         return
     tqdm.write(f"Model loaded from {model_checkpoint}")
 
-    val_accuracy, eval_metrics = eval_model(fabric, model, testloader, args.num_classes)
+    val_accuracy, eval_metrics = eval_model(fabric, model, testloader, num_classes)
     val_accuracy *= 100
 
     if not fabric.is_global_zero:
@@ -166,9 +168,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--num_dataset_workers", type=int, default=4, help="Number of dataset workers"
-    )
-    parser.add_argument(
-        "--num_classes", type=int, default=10, help="Number of classes in the data"
     )
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size")
     return parser.parse_args()
