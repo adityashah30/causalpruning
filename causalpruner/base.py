@@ -28,12 +28,24 @@ class Pruner(ABC):
         nn.Conv3d,
     ]
 
+    _MODULES_TO_RESET = [
+        nn.BatchNorm1d,
+        nn.BatchNorm2d,
+    ]
+
     _PREFIXES_TO_CONSUME = ["_forward_module."]
 
     @staticmethod
     def is_module_supported(module: nn.Module) -> bool:
         for supported_module in Pruner._SUPPORTED_MODULES:
             if isinstance(module, supported_module):
+                return True
+        return False
+
+    @staticmethod
+    def is_module_to_be_reset(module: nn.Module) -> bool:
+        for module_to_be_reset in Pruner._MODULES_TO_RESET:
+            if isinstance(module, module_to_be_reset):
                 return True
         return False
 
@@ -52,12 +64,15 @@ class Pruner(ABC):
         self.iteration = -1
 
         self.modules_dict = dict()
+        self.modules_to_reset = dict()
         for name, module in self.config.model.named_modules():
             for prefix in self._PREFIXES_TO_CONSUME:
                 if name.startswith(prefix):
                     name = name.removeprefix(prefix)
             if self.is_module_supported(module):
                 self.modules_dict[name] = module
+            if self.is_module_to_be_reset(module):
+                self.modules_to_reset[name] = module
 
         self.params = []
         for module_name, module in self.modules_dict.items():
@@ -122,7 +137,10 @@ class Pruner(ABC):
 
     @torch.no_grad()
     def start_pruning(self) -> None:
-        torch.save(self.config.model.state_dict(), self.init_model_path)
+        if self.fabric.is_global_zero:
+            self.fabric.save(self.init_model_path, {
+                             "model": self.config.model})
+        self.fabric.barrier()
 
     @torch.no_grad()
     def start_iteration(self) -> None:
@@ -138,8 +156,14 @@ class Pruner(ABC):
         self.fabric.barrier()
 
     @torch.no_grad()
+    def reset_params(self) -> None:
+        for module in self.modules_to_reset.values():
+            module.reset_parameters()
+
+    @torch.no_grad()
     def reset_weights(self) -> None:
         self.config.model.zero_grad(set_to_none=True)
+        self.reset_params()
         if not self.config.reset_weights:
             return
         masks = dict()
@@ -147,7 +171,8 @@ class Pruner(ABC):
             if hasattr(module, "weight_mask"):
                 masks[name] = getattr(module, "weight_mask")
         self.remove_masks()
-        self.config.model.load_state_dict(torch.load(self.init_model_path))
+        self.fabric.load(self.init_model_path, {"model": self.config.model})
+        self.reset_params()
         for name, module in self.modules_dict.items():
             if name in masks:
                 prune.custom_from_mask(module, "weight", masks[name])

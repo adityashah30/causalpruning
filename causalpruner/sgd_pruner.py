@@ -107,7 +107,8 @@ class SGDPruner(Pruner):
             self.weights_checkpoint_dir, f"{self.iteration}"
         )
         self.delta_weights_computer = DeltaComputer(transform=torch.square)
-        self.loss_dir = os.path.join(self.loss_checkpoint_dir, f"{self.iteration}")
+        self.loss_dir = os.path.join(
+            self.loss_checkpoint_dir, f"{self.iteration}")
         self.delta_loss_computer = DeltaComputer()
         self.checkpoint_futures = []
         self.counter = 0
@@ -115,7 +116,9 @@ class SGDPruner(Pruner):
     @torch.no_grad()
     def get_flattened_weight(self) -> torch.Tensor:
         def get_tensor(param):
-            return torch.flatten(self.modules_dict[param].weight.detach().cpu())
+            return torch.flatten(self.modules_dict[param].weight.detach()).to(
+                "cpu", non_blocking=True
+            )
 
         return torch.cat(tuple(map(get_tensor, self.params)))
 
@@ -151,7 +154,8 @@ class SGDPruner(Pruner):
 
         delta_loss = self.delta_loss_computer.get_delta()
         if delta_loss is not None:
-            self.write_tensor(delta_loss, self._get_checkpoint_path(self.loss_dir))
+            self.write_tensor(
+                delta_loss, self._get_checkpoint_path(self.loss_dir))
 
         delta_weights = self.delta_weights_computer.get_delta()
         if delta_weights is not None:

@@ -14,6 +14,7 @@ from lightning.fabric import Fabric
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torchvision.transforms import v2
 
 from causalpruner import (
     CausalWeightsTrainerConfig,
@@ -39,6 +40,7 @@ from trainer import (
 
 
 torch.set_float32_matmul_precision("medium")
+torch.backends.cudnn.benchmark = True
 
 
 def delete_dir_if_exists(dir: str):
@@ -70,6 +72,20 @@ def get_pruner(pruner_config: PrunerConfig) -> Pruner:
     elif isinstance(pruner_config, MagPrunerConfig):
         return MagPruner(pruner_config)
     raise NotImplementedError(f"{type(pruner_config)} is not supported yet")
+
+
+def get_collate_fn(mixup_alpha: float, cutmix_alpha: float, num_classes: int):
+    transforms = []
+
+    if mixup_alpha > 0:
+        transforms.append(v2.MixUp(alpha=mixup_alpha, num_classes=num_classes))
+    if cutmix_alpha > 0:
+        transforms.append(v2.CutMix(alpha=cutmix_alpha, num_classes=num_classes))
+
+    if len(transforms) == 0:
+        return None
+
+    return v2.RandomChoice(transforms)
 
 
 def main(args):
@@ -107,7 +123,12 @@ def main(args):
         model_name,
         args.dataset_root_dir,
     )
-    fabric = Fabric(devices=args.device_ids, accelerator="auto")
+    collate_fn = get_collate_fn(
+        args.mixup_alpha, args.cutmix_alpha, num_classes=num_classes
+    )
+    fabric = Fabric(
+        devices=args.device_ids, accelerator="auto", precision=args.precision
+    )
     fabric.launch()
     model = get_model(model_name, dataset_name)
     prune_optimizer = get_prune_optimizer(args.optimizer, model, args.lr)
@@ -125,6 +146,7 @@ def main(args):
         pin_memory=args.pin_memory,
         shuffle=args.shuffle_dataset,
         num_classes=num_classes,
+        collate_fn=collate_fn,
     )
     epoch_config = EpochConfig(
         num_pre_prune_epochs=args.num_pre_prune_epochs if args.prune else 0,
@@ -226,6 +248,19 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="-1",
         help="The device id. Useful for multi device systems",
+    )
+    parser.add_argument(
+        "--precision",
+        type=str,
+        default="32",
+        choices=[
+            "32",
+            "16-mixed",
+            "bf16-mixed",
+            "16-true",
+            "bf16-true",
+            "transformer-engine",
+        ],
     )
     parser.add_argument(
         "--suffix",
@@ -344,7 +379,7 @@ def parse_args() -> argparse.Namespace:
         help="Directory to download datasets",
     )
     parser.add_argument(
-        "--num_dataset_workers", type=int, default=6, help="Number of dataset workers"
+        "--num_dataset_workers", type=int, default=8, help="Number of dataset workers"
     )
     parser.add_argument(
         "--pin_memory",
@@ -357,6 +392,18 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Whether to shuffle the train and test datasets",
+    )
+    parser.add_argument(
+        "--mixup_alpha",
+        type=float,
+        default=-1,
+        help="Mixup alpha for MixUp augmentations",
+    )
+    parser.add_argument(
+        "--cutmix_alpha",
+        type=float,
+        default=-1,
+        help="Mixup alpha for CutMix augmentations",
     )
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size")
     # Dirs

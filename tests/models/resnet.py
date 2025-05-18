@@ -3,127 +3,9 @@ import torch.nn.functional as F
 from torchvision.models import (
     resnet18,
     resnet50,
+    ResNet18_Weights,
     ResNet50_Weights,
 )
-
-
-class BasicBlock(nn.Module):
-    expansion = 1
-
-    def __init__(self, in_planes: int, planes: int, stride: int = 1):
-        super(BasicBlock, self).__init__()
-        self.conv1 = nn.Conv2d(
-            in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=True
-        )
-        self.conv2 = nn.Conv2d(
-            planes, planes, kernel_size=3, stride=1, padding=1, bias=True
-        )
-
-        self.shortcut = nn.Sequential()
-        if stride != 1 or in_planes != self.expansion * planes:
-            self.shortcut = nn.Conv2d(
-                in_planes,
-                self.expansion * planes,
-                kernel_size=1,
-                stride=stride,
-                bias=True,
-            )
-
-    def forward(self, x):
-        out = F.relu(self.conv1(x))
-        out = self.conv2(out)
-        out += self.shortcut(x)
-        out = F.relu(out)
-        return out
-
-
-class ResNet(nn.Module):
-    def __init__(
-        self,
-        block: nn.Module,
-        num_blocks: list[int],
-        num_classes: int,
-        num_channels: int,
-        kernel: int,
-        stride: int,
-        padding: int,
-    ):
-        super().__init__()
-        self.in_planes = 64
-        self.conv1 = nn.Conv2d(
-            num_channels,
-            self.in_planes,
-            kernel_size=kernel,
-            stride=stride,
-            padding=padding,
-            bias=True,
-        )
-        self.layer1 = self._make_layer(block, 64, num_blocks[0], stride=1)
-        self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2)
-        self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2)
-        self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2)
-        self.linear = nn.Linear(512 * block.expansion, num_classes)
-
-    def _make_layer(self, block, planes, num_blocks, stride):
-        strides = [stride] + [1] * (num_blocks - 1)
-        layers = []
-        for stride in strides:
-            layers.append(block(self.in_planes, planes, stride))
-            self.in_planes = planes * block.expansion
-        return nn.Sequential(*layers)
-
-    def forward(self, x):
-        out = F.relu(self.conv1(x))
-        out = self.layer1(out)
-        out = self.layer2(out)
-        out = self.layer3(out)
-        out = self.layer4(out)
-        out = F.avg_pool2d(out, 4)
-        out = out.view(out.size(0), -1)
-        out = self.linear(out)
-        return out
-
-
-def ResNet18(
-    num_classes: int, num_channels: int, kernel: int, stride: int, padding: int
-) -> nn.Module:
-    return ResNet(
-        BasicBlock, [
-            2, 2, 2, 2], num_classes, num_channels, kernel, stride, padding
-    )
-
-
-def initialize_model_weights(model: nn.Module) -> nn.Module:
-    for m in model.modules():
-        if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
-            nn.init.kaiming_normal_(
-                m.weight,
-                mode="fan_out",
-                nonlinearity="relu",
-            )
-            if m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-    return model
-
-
-# def get_resnet18(dataset: str) -> nn.Module:
-#     dataset = dataset.lower()
-#     if dataset == "cifar10":
-#         model = ResNet18(num_classes=10, num_channels=3,
-#                          kernel=3, stride=1, padding=1)
-#         model = initialize_model_weights(model)
-#         return model
-#     elif dataset == "fashionmnist":
-#         model = ResNet18(num_classes=10, num_channels=1,
-#                          kernel=3, stride=1, padding=1)
-#         model = initialize_model_weights(model)
-#         return model
-#     elif dataset == "tinyimagenet":
-#         model = ResNet18(num_classes=200, num_channels=3,
-#                          kernel=3, stride=1, padding=1)
-#         model = initialize_model_weights(model)
-#         return model
-#     raise NotImplementedError(f"Resnet18 is not available for {dataset}")
 
 
 def get_resnet18(dataset: str) -> nn.Module:
@@ -142,6 +24,8 @@ def get_resnet18(dataset: str) -> nn.Module:
         )
         model.maxpool = nn.Identity()
         return model
+    elif dataset == "imagenet":
+        model = resnet18(weights=ResNet18_Weights.IMAGENET1k_V1)
     raise NotImplementedError(f"Resnet18 is not available for {dataset}")
 
 
