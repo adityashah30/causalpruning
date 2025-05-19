@@ -1,5 +1,6 @@
 import copy
 from dataclasses import dataclass
+from functools import partial
 import os
 from typing import Any, Callable, Optional, Union
 
@@ -95,7 +96,7 @@ class TrainerConfig:
     checkpoint_dir: str
     max_train_lr: float
     use_one_cycle_lr_scheduler: bool = False
-    loss_fn: Callable = F.cross_entropy
+    loss_fn: Callable = partial(F.cross_entropy, label_smoothing=0.1)
     verbose: bool = True
     train_only: bool = False
     model_to_load_for_training: str = "prune.final"
@@ -235,8 +236,7 @@ class Trainer:
             self.add_scalar("Loss/train", loss_avg.avg, self.global_step)
             accuracy = self.eval_model()
             self.pbar.set_description(
-                f"Pre-Prune: Epoch {epoch +
-                                    1}/{epoch_config.num_pre_prune_epochs}; "
+                f"Pre-Prune: Epoch {epoch + 1}/{epoch_config.num_pre_prune_epochs}; "
                 + f"Loss/Train: {loss_avg.avg:.4f}; "
                 + f"Accuracy/Test: {accuracy:.4f}"
             )
@@ -256,8 +256,7 @@ class Trainer:
         epoch_config = self.epoch_config
         num_batches_in_epoch = epoch_config.num_batches_in_epoch
         tqdm_update_frequency = epoch_config.tqdm_update_frequency
-        self.config.train_optimizer.load_state_dict(
-            self.train_optimizer_init_state)
+        self.config.train_optimizer.load_state_dict(self.train_optimizer_init_state)
         for epoch in range(epoch_config.num_train_epochs_before_pruning):
             self.global_step += 1
             self.pbar.update(1)
@@ -440,8 +439,7 @@ class Trainer:
 
     def _run_training(self):
         self._load_model(self.config.model_to_load_for_training)
-        self.config.train_optimizer.load_state_dict(
-            self.train_optimizer_init_state)
+        self.config.train_optimizer.load_state_dict(self.train_optimizer_init_state)
         config = self.config
         max_lr = config.max_train_lr
         if config.lrrt_config.enable:
@@ -451,8 +449,7 @@ class Trainer:
             train_lr = get_optimizer_lr(config.train_optimizer)
             self.create_one_cycle_lr_scheduler(train_lr, max_lr)
         tqdm.write(
-            f"Setting learning rate: {
-                get_optimizer_lr(config.train_optimizer):.1e}"
+            f"Setting learning rate: {get_optimizer_lr(config.train_optimizer):.1e}"
         )
         epoch_config = self.epoch_config
         num_batches_in_epoch = epoch_config.num_batches_in_epoch
@@ -495,8 +492,7 @@ class Trainer:
             accuracy = self.eval_model()
             if accuracy > best_accuracy:
                 best_accuracy = accuracy
-                self._checkpoint_model(
-                    self.config.model_to_save_after_training)
+                self._checkpoint_model(self.config.model_to_save_after_training)
             if loss > (best_loss - config.train_convergence_loss_tolerance):
                 iter_no_change += 1
             else:
@@ -554,13 +550,10 @@ class Trainer:
         tqdm.write(f"Recall: {eval_metrics.recall}")
         tqdm.write(f"F1 Score: {eval_metrics.f1_score}")
         tqdm.write("\n======================================================\n")
-        self.add_scalars("Final/Accuracy",
-                         eval_metrics.accuracy, self.global_step)
-        self.add_scalars("Final/Precision",
-                         eval_metrics.precision, self.global_step)
+        self.add_scalars("Final/Accuracy", eval_metrics.accuracy, self.global_step)
+        self.add_scalars("Final/Precision", eval_metrics.precision, self.global_step)
         self.add_scalars("Final/Recall", eval_metrics.recall, self.global_step)
-        self.add_scalars(
-            "Final/F1Score", eval_metrics.f1_score, self.global_step)
+        self.add_scalars("Final/F1Score", eval_metrics.f1_score, self.global_step)
 
     @torch.no_grad
     def compute_prune_stats(self):
@@ -588,20 +581,16 @@ class Trainer:
                 f"percent: {percent:.2f}%"
             )
             self.add_scalar(f"{name}/pruned", pruned, self.global_step)
-            self.add_scalar(f"{name}/pruned_percent",
-                            percent, self.global_step)
+            self.add_scalar(f"{name}/pruned_percent", percent, self.global_step)
         all_params_non_zero = all_params_total - all_params_pruned
-        all_params_percent = 100 * all_params_pruned / \
-            (all_params_total + 1e-6)
+        all_params_percent = 100 * all_params_pruned / (all_params_total + 1e-6)
         tqdm.write(
             f"Name: All; Total: {all_params_total}; "
-            f"non-zero: {all_params_non_zero}; " +
-            f"pruned: {all_params_pruned}; "
+            f"non-zero: {all_params_non_zero}; " + f"pruned: {all_params_pruned}; "
             f"percent: {all_params_percent:.2f}%"
         )
         self.add_scalar(f"all/pruned", all_params_pruned, self.global_step)
-        self.add_scalar(f"all/pruned_percent",
-                        all_params_percent, self.global_step)
+        self.add_scalar(f"all/pruned_percent", all_params_percent, self.global_step)
         tqdm.write("\n======================================================\n")
 
     def _checkpoint_model(self, id: str):
