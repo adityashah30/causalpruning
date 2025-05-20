@@ -29,6 +29,7 @@ class DataConfig:
     test_dataset: Dataset
     num_classes: int
     batch_size: int
+    batch_size_while_pruning: int
     num_workers: int
     pin_memory: bool
     shuffle: bool
@@ -181,6 +182,15 @@ class Trainer:
             persistent_workers=data_config.num_workers > 0,
             collate_fn=collate_fn,
         )
+        self.pruning_trainloader = DataLoader(
+            data_config.train_dataset,
+            batch_size=data_config.batch_size_while_pruning,
+            shuffle=data_config.shuffle,
+            pin_memory=data_config.pin_memory,
+            num_workers=data_config.num_workers,
+            persistent_workers=False,
+            # collate_fn=collate_fn,
+        )
         self.testloader = DataLoader(
             data_config.test_dataset,
             batch_size=data_config.batch_size,
@@ -189,8 +199,10 @@ class Trainer:
             num_workers=data_config.num_workers,
             persistent_workers=data_config.num_workers > 0,
         )
-        self.trainloader, self.testloader = self.fabric.setup_dataloaders(
-            self.trainloader, self.testloader
+        (self.trainloader, self.pruning_trainloader, self.testloader) = (
+            self.fabric.setup_dataloaders(
+                self.trainloader, self.pruning_trainloader, self.testloader
+            )
         )
 
     def _should_prune(self) -> bool:
@@ -303,14 +315,14 @@ class Trainer:
         num_batches_in_epoch = epoch_config.num_batches_in_epoch
         tqdm_update_frequency = epoch_config.tqdm_update_frequency
         self.pruner.start_iteration()
-        model_state_dict = config.model.state_dict()
+        init_model_state = copy.deepcopy(config.model.state_dict())
         for epoch in range(epoch_config.num_prune_epochs):
             self.global_step += 1
             self.pbar.update(1)
             config.model.train()
             loss_avg = AverageMeter()
             pbar = tqdm(
-                self.trainloader,
+                self.pruning_trainloader,
                 leave=False,
                 desc=f"Prune epoch: {epoch}",
                 dynamic_ncols=True,
@@ -330,7 +342,7 @@ class Trainer:
                 outputs = config.model(inputs)
                 loss = config.loss_fn(outputs, labels)
                 self.pruner.provide_loss_after_step(loss.item())
-                config.model.load_state_dict(model_state_dict)
+                config.model.load_state_dict(init_model_state)
                 if (batch_counter + 1) % tqdm_update_frequency == 0:
                     pbar.update(tqdm_update_frequency)
                 if num_batches_in_epoch > 0 and batch_counter >= num_batches_in_epoch:
@@ -348,8 +360,6 @@ class Trainer:
                 + f"Loss/Train: {loss_avg.avg:.4f}; "
                 + f"Accuracy/Test: {accuracy:.4f}"
             )
-        del self.trainloader._iterator
-        self.trainloader._iterator = None
         self.pruner.compute_masks()
         self.compute_prune_stats()
         self.pruner.reset_weights()
@@ -571,8 +581,10 @@ class Trainer:
             return
         if self.fabric.global_rank != 0:
             return
+        accuracy = self.eval_model()
         tqdm.write("\n======================================================\n")
         tqdm.write(f"Global Step: {self.global_step + 1}")
+        tqdm.write(f"Accuracy after pruning: {accuracy:.4f}")
         all_params_total = 0
         all_params_pruned = 0
         for name, param in self.config.model.named_buffers():

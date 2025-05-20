@@ -6,20 +6,6 @@ from torchvision.datasets import CIFAR10
 from torchvision.transforms import v2
 
 
-_DEFAULT_TRAIN_TRANSFORMS = [
-    v2.RandomCrop(32),
-    v2.RandomHorizontalFlip(),
-    v2.ToImage(),
-    v2.ToDtype(torch.float32, scale=True),
-    v2.Normalize(mean=(0.4914, 0.4822, 0.4465), std=(0.2023, 0.1994, 0.2010)),
-]
-_DEFAULT_TEST_TRANSFORMS = [
-    v2.ToImage(),
-    v2.ToDtype(torch.float32, scale=True),
-    v2.Normalize(mean=(0.4914, 0.4822, 0.4465), std=(0.2023, 0.1994, 0.2010)),
-]
-
-
 @torch.no_grad
 def get_cifar_10(
     model_name: str, data_root_dir: str
@@ -27,8 +13,29 @@ def get_cifar_10(
     model_name = model_name.lower()
     cifar_root_dir = os.path.join(data_root_dir, "cifar10")
     if model_name in ["alexnet", "lenet", "resnet18"]:
-        train_transforms = v2.Compose(_DEFAULT_TRAIN_TRANSFORMS)
-        test_transforms = v2.Compose(_DEFAULT_TEST_TRANSFORMS)
+        train_transforms = v2.Compose(
+            [
+                v2.RandomCrop(32),
+                v2.RandomHorizontalFlip(p=0.5),
+                v2.PILToTensor(),
+                v2.ToDtype(torch.float32, scale=True),
+                v2.Normalize(
+                    mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010]
+                ),
+                v2.RandomErasing(0.1),
+                v2.ToPureTensor(),
+            ]
+        )
+        test_transforms = v2.Compose(
+            [
+                v2.PILToTensor(),
+                v2.ToDtype(torch.float32, scale=True),
+                v2.Normalize(
+                    mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010]
+                ),
+                v2.ToPureTensor(),
+            ]
+        )
         train = CIFAR10(
             cifar_root_dir, train=True, download=True, transform=train_transforms
         )

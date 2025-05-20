@@ -138,10 +138,12 @@ def main(args):
     )
     world_size = fabric.world_size
     batch_size = args.batch_size // world_size
+    batch_size_while_pruning = args.batch_size_while_pruning // world_size
     data_config = DataConfig(
         train_dataset=train_dataset,
         test_dataset=test_dataset,
         batch_size=batch_size,
+        batch_size_while_pruning=batch_size_while_pruning,
         num_workers=args.num_dataset_workers,
         pin_memory=args.pin_memory,
         shuffle=args.shuffle_dataset,
@@ -476,8 +478,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--reset_weights_after_pruning",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
         help="Reset weights to an earlier checkpoint after prune step if true.",
+    )
+    parser.add_argument(
+        "--batch_size_while_pruning",
+        type=int,
+        default=128,
+        help="Batch size while pruning",
     )
     parser.add_argument(
         "--causal_pruner_threaded_checkpoint_writer",
