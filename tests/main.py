@@ -131,6 +131,8 @@ def main(args):
     )
     fabric.launch()
     model = get_model(model_name, dataset_name)
+    if args.compile_model:
+        model = torch.compile(model)
     prune_optimizer = get_prune_optimizer(args.optimizer, model, args.lr)
     train_optimizer = get_train_optimizer(args.train_optimizer, model, args.train_lr)
     model, prune_optimizer, train_optimizer = fabric.setup(
@@ -277,6 +279,12 @@ def parse_args() -> argparse.Namespace:
         choices=["alexnet", "lenet", "resnet18", "resnet50", "resnet50_untrained"],
         default="lenet",
         help="Model name",
+    )
+    parser.add_argument(
+        "--compile_model",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Compile the model for faster execution.",
     )
     parser.add_argument(
         "--early_stopping",
