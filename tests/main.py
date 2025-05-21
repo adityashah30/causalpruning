@@ -451,11 +451,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--num_train_epochs_before_pruning",
         type=int,
-        default=0,
+        default=10,
         help="Number of epochs for training before pruning in each pruning iteration",
     )
     parser.add_argument(
-        "--num_prune_epochs", type=int, default=10, help="Number of epochs for pruning"
+        "--num_prune_epochs", type=int, default=1, help="Number of epochs for pruning"
     )
     parser.add_argument(
         "--num_batches_in_epoch",
@@ -469,7 +469,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--optimizer", type=str, default="sgd", help="Optimizer", choices=["sgd"]
     )
-    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
+    parser.add_argument(
+        "--lr", type=float, default=1e-3, help="Prune optimizer learning rate"
+    )
     parser.add_argument(
         "--eval_after_epoch",
         action=argparse.BooleanOptionalAction,
@@ -510,7 +512,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--causal_pruner_init_lr",
         type=float,
-        default=1e-2,
+        default=1e-3,
         help="Learning rate for causal pruner",
     )
     parser.add_argument(
@@ -522,7 +524,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--causal_pruner_max_iter",
         type=int,
-        default=1000,
+        default=100,
         help="Maximum number of iterations to run causal pruner training",
     )
     parser.add_argument(
@@ -540,7 +542,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--causal_pruner_batch_size",
         type=int,
-        default=64,
+        default=16,
         help="Batch size for causal pruner training. Use -1 to use the entire dataset",
     )
     parser.add_argument(
@@ -552,7 +554,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--causal_pruner_pin_memory",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=True,
         help="Controls if the causal pruner dataloader uses pinned memory.",
     )
     parser.add_argument(

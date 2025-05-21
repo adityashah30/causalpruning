@@ -93,9 +93,10 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
         self.fabric = config.fabric
         self.num_params = num_params
         self.layer = nn.Linear(self.num_params, 1, bias=False)
-        nn.init.zeros_(self.layer.weight)
+        nn.init.kaiming_normal_(self.layer.weight)
         mask = initial_mask.view_as(self.layer.weight)
         prune.custom_from_mask(self.layer, "weight", mask)
+        self.l1_regularization_coeff = 1.0 / num_params
         self.optimizer = optim.SGD(
             self.layer.parameters(),
             lr=self.init_lr,
@@ -128,7 +129,7 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
                 outputs = self.layer(X)
                 Y = Y.view(outputs.size())
                 loss = (
-                    0.5 * F.mse_loss(outputs, Y, reduction="mean")
+                    F.huber_loss(outputs, Y, reduction="mean")
                     + self.l1_regularization_coeff * self._l1_penalty()
                 )
                 self.fabric.backward(loss)
@@ -142,6 +143,7 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
             num_loss = self.fabric.all_reduce(num_loss, reduce_op="sum")
             num_items = num_loss.item()
             loss = total_loss.item() / num_items
+            tqdm.write(f"Pruning iter: {iter + 1}; loss: {loss:.2e}")
             if loss > (best_loss - self.loss_tol):
                 iter_no_change += 1
             else:

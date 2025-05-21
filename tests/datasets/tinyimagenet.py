@@ -7,19 +7,6 @@ from torchvision.datasets import ImageFolder
 from torchvision.transforms import v2
 
 
-_DEFAULT_TRAIN_TRANSFORMS = [
-    v2.RandomHorizontalFlip(),
-    v2.ToImage(),
-    v2.ToDtype(torch.float32, scale=True),
-    v2.Normalize(mean=(0.4802, 0.4481, 0.3975), std=(0.2764, 0.2689, 0.2816)),
-]
-_DEFAULT_TEST_TRANSFORMS = [
-    v2.ToImage(),
-    v2.ToDtype(torch.float32, scale=True),
-    v2.Normalize(mean=(0.4802, 0.4481, 0.3975), std=(0.2764, 0.2689, 0.2816)),
-]
-
-
 class TinyImageNet(ImageFolder):
     def __init__(
         self,
@@ -44,8 +31,24 @@ def get_tiny_imagenet(
     model_name = model_name.lower()
     tinyimagenet_root_dir = os.path.join(data_root_dir, "tinyimagenet200")
     if model_name in ["lenet", "resnet18"]:
-        train_transforms = v2.Compose(_DEFAULT_TRAIN_TRANSFORMS)
-        test_transforms = v2.Compose(_DEFAULT_TEST_TRANSFORMS)
+        train_transforms = v2.Compose(
+            [
+                v2.RandomResizedCrop(64),
+                v2.RandomHorizontalFlip(),
+                v2.ToImage(),
+                v2.ToDtype(torch.float32, scale=True),
+                v2.Normalize(mean=(0.485, 0.456, 0.406),
+                             std=(0.229, 0.224, 0.225)),
+            ]
+        )
+        test_transforms = v2.Compose(
+            [
+                v2.ToImage(),
+                v2.ToDtype(torch.float32, scale=True),
+                v2.Normalize(mean=(0.485, 0.456, 0.406),
+                             std=(0.229, 0.224, 0.225)),
+            ]
+        )
         train = TinyImageNet(
             tinyimagenet_root_dir,
             train=True,
@@ -59,10 +62,24 @@ def get_tiny_imagenet(
         return (train, test)
     elif model_name == "alexnet":
         train_transforms = v2.Compose(
-            [v2.Resize((224, 224))] + _DEFAULT_TRAIN_TRANSFORMS
+            [
+                v2.RandomResizedCrop(224),
+                v2.RandomHorizontalFlip(),
+                v2.ToImage(),
+                v2.ToDtype(torch.float32, scale=True),
+                v2.Normalize(mean=(0.485, 0.456, 0.406),
+                             std=(0.229, 0.224, 0.225)),
+            ]
         )
         test_transforms = v2.Compose(
-            [v2.Resize((224, 224))] + _DEFAULT_TEST_TRANSFORMS)
+            [
+                v2.Resize((224, 224)),
+                v2.ToImage(),
+                v2.ToDtype(torch.float32, scale=True),
+                v2.Normalize(mean=(0.485, 0.456, 0.406),
+                             std=(0.229, 0.224, 0.225)),
+            ]
+        )
         train = TinyImageNet(
             tinyimagenet_root_dir,
             train=True,

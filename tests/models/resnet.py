@@ -29,6 +29,11 @@ def get_resnet18(dataset: str) -> nn.Module:
     raise NotImplementedError(f"Resnet18 is not available for {dataset}")
 
 
+def get_resnet20(dataset: str) -> nn.Module:
+    dataset = dataset.lower()
+    raise NotImplementedError(f"Resnet20 is not available for {dataset}")
+
+
 def get_resnet50(dataset: str) -> nn.Module:
     dataset = dataset.lower()
     if dataset == "imagenet":
