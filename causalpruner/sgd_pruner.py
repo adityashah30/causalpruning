@@ -206,7 +206,7 @@ class SGDPruner(Pruner):
             dataset,
             batch_size=batch_size,
             pin_memory=pin_memory,
-            shuffle=True,
+            shuffle=False,
             num_workers=num_workers,
             persistent_workers=num_workers > 0,
         )

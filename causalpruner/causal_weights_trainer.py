@@ -26,6 +26,7 @@ class CausalWeightsTrainerConfig:
     max_iter: int
     loss_tol: float
     num_iter_no_change: int
+    initialization: Literal["zeros", "xavier_normal"] = "zeros"
     backend: Literal["sklearn", "torch"] = "torch"
 
 
@@ -88,13 +89,17 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
         self,
         config: CausalWeightsTrainerConfig,
         num_params: int,
-        initial_mask=torch.Tensor,
+        initial_mask: torch.Tensor,
     ):
         super().__init__(config)
         self.fabric = config.fabric
         self.num_params = num_params
         self.layer = nn.Linear(self.num_params, 1, bias=False)
-        nn.init.kaiming_uniform_(self.layer.weight)
+        initialization = config.initialization.lower()
+        if initialization == "zeros":
+            nn.init.zeros_(self.layer.weight)
+        elif initialization == "xavier_normal":
+            nn.init.xavier_normal_(self.layer.weight)
         mask = initial_mask.view_as(self.layer.weight)
         prune.custom_from_mask(self.layer, "weight", mask)
         # self.l1_regularization_coeff = 1.0 / num_params
@@ -135,7 +140,7 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
                 outputs = self.layer(X)
                 Y = Y.view(outputs.size())
                 loss = (
-                    F.huber_loss(outputs, Y, reduction="mean")
+                    F.huber_loss(outputs, Y, reduction="mean", delta=1e-3)
                     + self.l1_regularization_coeff * self._l1_penalty()
                     + self.l2_regularization_coeff * self._l2_penalty()
                 )

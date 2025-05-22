@@ -207,6 +207,7 @@ def main(args):
                 fabric=fabric,
                 init_lr=args.causal_pruner_init_lr,
                 l1_regularization_coeff=args.causal_pruner_l1_regularization_coeff,
+                initialization=args.causal_pruner_weights_initialization,
                 prune_amount=prune_amount_per_iteration,
                 max_iter=args.causal_pruner_max_iter,
                 loss_tol=args.causal_pruner_loss_tol,
@@ -520,6 +521,13 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0,
         help="Causal Pruner L1 regularization coefficient",
+    )
+    parser.add_argument(
+        "--causal_pruner_weights_initialization",
+        type=str,
+        default="zeros",
+        choices=["zeros", "xavier_normal"],
+        help="Causal Pruner model weights initialization scheme",
     )
     parser.add_argument(
         "--causal_pruner_max_iter",
