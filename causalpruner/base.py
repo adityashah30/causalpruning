@@ -129,9 +129,11 @@ class Pruner(ABC):
                 if isinstance(hook, prune.BasePruningMethod):
                     del module._forward_pre_hooks[k]
 
+    @torch.no_grad()
     def provide_loss_before_step(self, loss: float) -> None:
         pass
 
+    @torch.no_grad()
     def provide_loss_after_step(self, loss: float) -> None:
         pass
 

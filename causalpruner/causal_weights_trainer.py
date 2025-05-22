@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Literal
 
@@ -93,10 +94,11 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
         self.fabric = config.fabric
         self.num_params = num_params
         self.layer = nn.Linear(self.num_params, 1, bias=False)
-        nn.init.kaiming_normal_(self.layer.weight)
+        nn.init.kaiming_uniform_(self.layer.weight)
         mask = initial_mask.view_as(self.layer.weight)
         prune.custom_from_mask(self.layer, "weight", mask)
-        self.l1_regularization_coeff = 1.0 / num_params
+        # self.l1_regularization_coeff = 1.0 / num_params
+        self.l2_regularization_coeff = self.l1_regularization_coeff
         self.optimizer = optim.SGD(
             self.layer.parameters(),
             lr=self.init_lr,
@@ -113,6 +115,9 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
     def _l1_penalty(self) -> float:
         return torch.norm(self.layer.weight, p=1)
 
+    def _l2_penalty(self) -> float:
+        return torch.norm(self.layer.weight, p=2)
+
     def fit(self, dataloader: DataLoader) -> int:
         dataloader = self.fabric.setup_dataloaders(dataloader)
         self.layer.train()
@@ -126,15 +131,16 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
             sumloss = 0.0
             numlossitems = 0
             for X, Y in tqdm(dataloader, leave=False, dynamic_ncols=True):
+                self.optimizer.zero_grad(set_to_none=True)
                 outputs = self.layer(X)
                 Y = Y.view(outputs.size())
                 loss = (
                     F.huber_loss(outputs, Y, reduction="mean")
                     + self.l1_regularization_coeff * self._l1_penalty()
+                    + self.l2_regularization_coeff * self._l2_penalty()
                 )
                 self.fabric.backward(loss)
                 self.optimizer.step()
-                self.optimizer.zero_grad(set_to_none=True)
                 sumloss += loss.item()
                 numlossitems += 1
             total_loss = torch.tensor([sumloss])
@@ -143,16 +149,21 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
             num_loss = self.fabric.all_reduce(num_loss, reduce_op="sum")
             num_items = num_loss.item()
             loss = total_loss.item() / num_items
-            tqdm.write(f"Pruning iter: {iter + 1}; loss: {loss:.2e}")
+            tqdm.write(
+                f"Pruning iter: {iter + 1}; "
+                + f"loss: {loss:.4e}; best_loss: {best_loss:.4e}"
+            )
             if loss > (best_loss - self.loss_tol):
                 iter_no_change += 1
             else:
                 iter_no_change = 0
             if loss < best_loss:
                 best_loss = loss
+                best_model_state = deepcopy(self.layer.state_dict())
             if iter_no_change >= self.num_iter_no_change:
                 conv_iter = iter + 1
                 break
+        self.layer.load_state_dict(best_model_state)
         prune.l1_unstructured(
             self.layer.module, name="weight", amount=self.prune_amount
         )

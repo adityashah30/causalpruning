@@ -530,7 +530,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--causal_pruner_loss_tol",
         type=float,
-        default=1e-4,
+        default=1e-6,
         help="Loss tolerance between current loss and best loss for early stopping",
     )
     parser.add_argument(

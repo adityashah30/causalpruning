@@ -328,6 +328,7 @@ class Trainer:
                 dynamic_ncols=True,
             )
             for batch_counter, data in enumerate(pbar):
+                config.prune_optimizer.zero_grad(set_to_none=True)
                 inputs, labels = data
                 outputs = config.model(inputs)
                 # Compute loss
@@ -337,11 +338,11 @@ class Trainer:
                 self.fabric.backward(loss)
                 loss_avg.update(loss.item())
                 config.prune_optimizer.step()
-                config.prune_optimizer.zero_grad(set_to_none=True)
                 # Compute loss again
-                outputs = config.model(inputs)
-                loss = config.loss_fn(outputs, labels)
-                self.pruner.provide_loss_after_step(loss.item())
+                with torch.no_grad():
+                    outputs = config.model(inputs)
+                    loss = config.loss_fn(outputs, labels)
+                    self.pruner.provide_loss_after_step(loss.item())
                 config.model.load_state_dict(init_model_state)
                 if (batch_counter + 1) % tqdm_update_frequency == 0:
                     pbar.update(tqdm_update_frequency)
@@ -579,12 +580,10 @@ class Trainer:
     def compute_prune_stats(self):
         if not self.config.verbose:
             return
-        if self.fabric.global_rank != 0:
+        if not self.fabric.is_global_zero:
             return
-        accuracy = self.eval_model()
         tqdm.write("\n======================================================\n")
         tqdm.write(f"Global Step: {self.global_step + 1}")
-        tqdm.write(f"Accuracy after pruning: {accuracy:.4f}")
         all_params_total = 0
         all_params_pruned = 0
         for name, param in self.config.model.named_buffers():
