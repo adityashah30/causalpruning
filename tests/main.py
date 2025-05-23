@@ -123,21 +123,15 @@ def main(args):
         model_name,
         args.dataset_root_dir,
     )
-    collate_fn = get_collate_fn(
-        args.mixup_alpha, args.cutmix_alpha, num_classes=num_classes
-    )
-    fabric = Fabric(
-        devices=args.device_ids, accelerator="auto", precision=args.precision
-    )
+    collate_fn = get_collate_fn(args.mixup_alpha, args.cutmix_alpha, num_classes=num_classes)
+    fabric = Fabric(devices=args.device_ids, accelerator="auto", precision=args.precision)
     fabric.launch()
     model = get_model(model_name, dataset_name)
     if args.compile_model:
         model = torch.compile(model)
     prune_optimizer = get_prune_optimizer(args.optimizer, model, args.lr)
     train_optimizer = get_train_optimizer(args.train_optimizer, model, args.train_lr)
-    model, prune_optimizer, train_optimizer = fabric.setup(
-        model, prune_optimizer, train_optimizer
-    )
+    model, prune_optimizer, train_optimizer = fabric.setup(model, prune_optimizer, train_optimizer)
     world_size = fabric.world_size
     batch_size = args.batch_size // world_size
     batch_size_while_pruning = args.batch_size_while_pruning // world_size
@@ -155,9 +149,7 @@ def main(args):
     epoch_config = EpochConfig(
         num_pre_prune_epochs=args.num_pre_prune_epochs if args.prune else 0,
         num_prune_iterations=args.num_prune_iterations if args.prune else 0,
-        num_train_epochs_before_pruning=args.num_train_epochs_before_pruning
-        if args.prune
-        else 0,
+        num_train_epochs_before_pruning=args.num_train_epochs_before_pruning if args.prune else 0,
         num_prune_epochs=args.num_prune_epochs if args.prune else 0,
         num_train_epochs=args.max_train_epochs,
         num_batches_in_epoch=args.num_batches_in_epoch,
@@ -198,9 +190,7 @@ def main(args):
     if args.prune:
         total_prune_amount = args.total_prune_amount
         num_prune_iterations = args.num_prune_iterations
-        prune_amount_per_iteration = 1 - (1 - total_prune_amount) ** (
-            1 / num_prune_iterations
-        )
+        prune_amount_per_iteration = 1 - (1 - total_prune_amount) ** (1 / num_prune_iterations)
         print(f"Prune amount per iteration: {prune_amount_per_iteration}")
         if args.pruner == "causalpruner":
             causal_weights_trainer_config = CausalWeightsTrainerConfig(
@@ -342,12 +332,8 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help="Runs the Learning Rate Range Finder test if enabled",
     )
-    parser.add_argument(
-        "--lrrt_max_lr", type=float, default=10.0, help="Max LR to use for LRRT"
-    )
-    parser.add_argument(
-        "--lrrt_min_lr", type=float, default=1e-7, help="Min LR to use for LRRT"
-    )
+    parser.add_argument("--lrrt_max_lr", type=float, default=10.0, help="Max LR to use for LRRT")
+    parser.add_argument("--lrrt_min_lr", type=float, default=1e-7, help="Min LR to use for LRRT")
     parser.add_argument(
         "--lrrt_num_steps", type=int, default=1000, help="Number of steps to run LRRT"
     )
@@ -467,12 +453,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tqdm_update_frequency", type=int, default=1, help="tqdm update frequency."
     )
-    parser.add_argument(
-        "--optimizer", type=str, default="sgd", help="Optimizer", choices=["sgd"]
-    )
-    parser.add_argument(
-        "--lr", type=float, default=1e-3, help="Prune optimizer learning rate"
-    )
+    parser.add_argument("--optimizer", type=str, default="sgd", help="Optimizer", choices=["sgd"])
+    parser.add_argument("--lr", type=float, default=1e-3, help="Prune optimizer learning rate")
     parser.add_argument(
         "--eval_after_epoch",
         action=argparse.BooleanOptionalAction,

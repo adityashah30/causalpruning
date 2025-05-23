@@ -15,6 +15,9 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm, trange
 
 from causalpruner import lrrt
+
+from causalpruner import lrrt
+
 # from causalpruner.lasso_optimizer import LassoSGD
 
 
@@ -116,8 +119,7 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
             weight_decay=5e-4,
             nesterov=True,
         )
-        self.layer, self.optimizer = self.fabric.setup(
-            self.layer, self.optimizer)
+        self.layer, self.optimizer = self.fabric.setup(self.layer, self.optimizer)
 
     def supports_batch_training(self) -> bool:
         return True
@@ -144,8 +146,24 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
         scheduler = lrrt.create_one_cycle_lr_scheduler(
             self.optimizer, best_lr / 10, best_lr, total_steps
         )
-        tqdm.write(f"Setting learning rate to {
-                   lrrt.get_optimizer_lr(self.optimizer)}")
+        tqdm.write(
+            f"Setting learning rate to {
+                   lrrt.get_optimizer_lr(self.optimizer)}"
+        )
+
+        if num_epochs > 0:
+            self.max_iter = num_epochs
+            self.num_iter_no_change = num_epochs
+
+        best_lr = self.init_lr
+        total_steps = self.max_iter * len(dataloader)
+        scheduler = lrrt.create_one_cycle_lr_scheduler(
+            self.optimizer, best_lr / 10, best_lr, total_steps
+        )
+        tqdm.write(
+            f"Setting learning rate to {
+                   lrrt.get_optimizer_lr(self.optimizer)}"
+        )
 
         conv_iter = self.max_iter
         for iter in trange(
@@ -174,8 +192,7 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
             num_items = num_loss.item()
             loss = total_loss.item() / num_items
             tqdm.write(
-                f"Pruning iter: {iter + 1}; " +
-                f"loss: {loss}; best_loss: {best_loss}"
+                f"Pruning iter: {iter + 1}; " + f"loss: {loss:.4e}; best_loss: {best_loss:.4e}"
             )
             if loss > (best_loss - self.loss_tol):
                 iter_no_change += 1
@@ -188,9 +205,7 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
                 conv_iter = iter + 1
                 break
         self.layer.load_state_dict(best_model_state)
-        prune.l1_unstructured(
-            self.layer.module, name="weight", amount=self.prune_amount
-        )
+        prune.l1_unstructured(self.layer.module, name="weight", amount=self.prune_amount)
         return conv_iter
 
     @torch.no_grad()
@@ -198,9 +213,7 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
         return torch.flatten(self.layer.weight_mask)
 
 
-def get_causal_weights_trainer(
-    config: CausalWeightsTrainerConfig, *args
-) -> CausalWeightsTrainer:
+def get_causal_weights_trainer(config: CausalWeightsTrainerConfig, *args) -> CausalWeightsTrainer:
     if config.backend == "sklearn":
         return CausalWeightsTrainerSklearn(config)
     elif config.backend == "torch":

@@ -121,9 +121,7 @@ class ZStatsComputer:
 class DeltaComputer:
     def __init__(
         self,
-        transform: Optional[
-            Callable[[torch.Tensor], torch.Tensor]
-        ] = torch.nn.Identity(),
+        transform: Optional[Callable[[torch.Tensor], torch.Tensor]] = torch.nn.Identity(),
     ):
         self.first_tensor = None
         self.second_tensor = None
@@ -168,21 +166,16 @@ class SGDPruner(Pruner):
         self.num_params = 0
         self.params_to_dims = dict()
         for param in self.params:
-            self.params_to_dims[param] = np.prod(
-                self.modules_dict[param].weight.size(), dtype=int
-            )
+            self.params_to_dims[param] = np.prod(self.modules_dict[param].weight.size(), dtype=int)
             self.num_params += self.params_to_dims[param]
         self.trainer_config = config.trainer_config
 
     @torch.no_grad()
     def start_iteration(self):
         super().start_iteration()
-        self.weights_dir = os.path.join(
-            self.weights_checkpoint_dir, f"{self.iteration}"
-        )
+        self.weights_dir = os.path.join(self.weights_checkpoint_dir, f"{self.iteration}")
         self.delta_weights_computer = DeltaComputer(transform=torch.square)
-        self.loss_dir = os.path.join(
-            self.loss_checkpoint_dir, f"{self.iteration}")
+        self.loss_dir = os.path.join(self.loss_checkpoint_dir, f"{self.iteration}")
         self.delta_loss_computer = DeltaComputer()
         self.checkpoint_futures = []
         self.counter = 0
@@ -228,14 +221,11 @@ class SGDPruner(Pruner):
 
         delta_loss = self.delta_loss_computer.get_delta()
         if delta_loss is not None:
-            self.write_tensor(
-                delta_loss, self._get_checkpoint_path(self.loss_dir))
+            self.write_tensor(delta_loss, self._get_checkpoint_path(self.loss_dir))
 
         delta_weights = self.delta_weights_computer.get_delta()
         if delta_weights is not None:
-            self.write_tensor(
-                delta_weights, self._get_checkpoint_path(self.weights_dir)
-            )
+            self.write_tensor(delta_weights, self._get_checkpoint_path(self.weights_dir))
 
         self.counter += 1
 
@@ -314,9 +304,7 @@ class SGDPruner(Pruner):
             end_index += self.params_to_dims[param]
             weight = self.modules_dict[param].weight
             masks[param] = (
-                mask[start_index:end_index]
-                .reshape_as(weight)
-                .to(weight.device, non_blocking=True)
+                mask[start_index:end_index].reshape_as(weight).to(weight.device, non_blocking=True)
             )
             start_index = end_index
         return masks

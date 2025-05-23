@@ -48,5 +48,4 @@ def get_resnet50_untrained(dataset: str) -> nn.Module:
         model = resnet50()
         model = initialize_model_weights(model)
         return model
-    raise NotImplementedError(
-        f"Resnet50 (untrained) is not available for {dataset}")
+    raise NotImplementedError(f"Resnet50 (untrained) is not available for {dataset}")
