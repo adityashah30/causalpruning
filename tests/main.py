@@ -416,7 +416,7 @@ def parse_args() -> argparse.Namespace:
         default=-1,
         help="Mixup alpha for CutMix augmentations",
     )
-    parser.add_argument("--batch_size", type=int, default=512, help="Batch size")
+    parser.add_argument("--batch_size", type=int, default=256, help="Batch size")
     # Dirs
     parser.add_argument(
         "--checkpoint_dir",
@@ -495,7 +495,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--batch_size_while_pruning",
         type=int,
-        default=128,
+        default=256,
         help="Batch size while pruning",
     )
     parser.add_argument(
@@ -513,7 +513,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--causal_pruner_init_lr",
         type=float,
-        default=1e-3,
+        default=1e-2,
         help="Learning rate for causal pruner",
     )
     parser.add_argument(
@@ -532,7 +532,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--causal_pruner_max_iter",
         type=int,
-        default=100,
+        default=30,
         help="Maximum number of iterations to run causal pruner training",
     )
     parser.add_argument(

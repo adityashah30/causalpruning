@@ -14,6 +14,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm, trange
 
+from causalpruner import lrrt
 # from causalpruner.lasso_optimizer import LassoSGD
 
 
@@ -26,12 +27,16 @@ class CausalWeightsTrainerConfig:
     max_iter: int
     loss_tol: float
     num_iter_no_change: int
+    lrrt_num_steps: int = 100
+    lrrt_min_lr: float = 1e-4
+    lrrt_max_lr: float = 10
     initialization: Literal["zeros", "xavier_normal"] = "zeros"
     backend: Literal["sklearn", "torch"] = "torch"
 
 
 class CausalWeightsTrainer(ABC):
     def __init__(self, config: CausalWeightsTrainerConfig):
+        self.config = config
         self.init_lr = config.init_lr
         self.l1_regularization_coeff = config.l1_regularization_coeff
         self.prune_amount = config.prune_amount
@@ -43,7 +48,7 @@ class CausalWeightsTrainer(ABC):
         return True
 
     @abstractmethod
-    def fit(self, dataloader: DataLoader) -> int:
+    def fit(self, dataloader: DataLoader, num_epochs: int = -1) -> int:
         raise NotImplementedError("Use the sklearn or pytorch version")
 
     @abstractmethod
@@ -68,7 +73,7 @@ class CausalWeightsTrainerSklearn(CausalWeightsTrainer):
     def supports_batch_training(self) -> bool:
         return False
 
-    def fit(self, dataloader: DataLoader) -> int:
+    def fit(self, dataloader: DataLoader, num_epochs: int = -1) -> int:
         X, Y = next(iter(dataloader))
         X = X.cpu().numpy()
         Y = np.ravel(Y.cpu().numpy())
@@ -123,11 +128,24 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
     def _l2_penalty(self) -> float:
         return torch.norm(self.layer.weight, p=2)
 
-    def fit(self, dataloader: DataLoader) -> int:
+    def fit(self, dataloader: DataLoader, num_epochs: int = -1) -> int:
         dataloader = self.fabric.setup_dataloaders(dataloader)
         self.layer.train()
+
         best_loss = np.inf
         iter_no_change = 0
+
+        if num_epochs > 0:
+            self.max_iter = num_epochs
+            self.num_iter_no_change = num_epochs
+
+        best_lr = self.init_lr
+        total_steps = self.max_iter * len(dataloader)
+        scheduler = lrrt.create_one_cycle_lr_scheduler(
+            self.optimizer, best_lr / 10, best_lr, total_steps
+        )
+        tqdm.write(f"Setting learning rate to {
+                   lrrt.get_optimizer_lr(self.optimizer)}")
 
         conv_iter = self.max_iter
         for iter in trange(
@@ -140,12 +158,13 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
                 outputs = self.layer(X)
                 Y = Y.view(outputs.size())
                 loss = (
-                    F.huber_loss(outputs, Y, reduction="mean", delta=1e-3)
-                    + self.l1_regularization_coeff * self._l1_penalty()
-                    + self.l2_regularization_coeff * self._l2_penalty()
+                    F.mse_loss(outputs, Y, reduction="mean")
+                    # + self.l1_regularization_coeff * self._l1_penalty()
+                    # + self.l2_regularization_coeff * self._l2_penalty()
                 )
                 self.fabric.backward(loss)
                 self.optimizer.step()
+                scheduler.step()
                 sumloss += loss.item()
                 numlossitems += 1
             total_loss = torch.tensor([sumloss])
@@ -155,8 +174,8 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
             num_items = num_loss.item()
             loss = total_loss.item() / num_items
             tqdm.write(
-                f"Pruning iter: {iter + 1}; "
-                + f"loss: {loss:.4e}; best_loss: {best_loss:.4e}"
+                f"Pruning iter: {iter + 1}; " +
+                f"loss: {loss}; best_loss: {best_loss}"
             )
             if loss > (best_loss - self.loss_tol):
                 iter_no_change += 1

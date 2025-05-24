@@ -20,6 +20,15 @@ from causalpruner.causal_weights_trainer import (
     get_causal_weights_trainer,
 )
 
+_ZSTATS_PATTERN = "zstats.pth"
+
+
+@dataclass
+class ZStats:
+    num_params: int
+    mean: torch.Tensor
+    std: torch.Tensor
+
 
 class ParamDataset(Dataset):
     def __init__(self, weights_base_dir: str, loss_base_dir: str):
@@ -30,6 +39,19 @@ class ParamDataset(Dataset):
             len(glob.glob(file_pattern, root_dir=self.weights_base_dir)),
             len(glob.glob(file_pattern, root_dir=self.loss_base_dir)),
         )
+        self.weights_zstats = self._load_zstats(self.weights_base_dir)
+        self.weight_scaling_factor = np.sqrt(self.weights_zstats.num_params)
+        self.loss_zstats = self._load_zstats(self.loss_base_dir)
+
+    @torch.no_grad()
+    def _load_zstats(self, base_dir: str) -> ZStats:
+        zstats_dict = torch.load(os.path.join(base_dir, _ZSTATS_PATTERN))
+        zstats = ZStats(
+            num_params=zstats_dict["num_params"],
+            mean=zstats_dict["mean"],
+            std=zstats_dict["std"],
+        )
+        return zstats
 
     @torch.no_grad()
     def __len__(self) -> int:
@@ -37,14 +59,63 @@ class ParamDataset(Dataset):
 
     @torch.no_grad()
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        delta_weights = self.get_delta_param(self.weights_base_dir, idx)
-        delta_loss = self.get_delta_param(self.loss_base_dir, idx)
+        delta_weights = self.get_delta_param(
+            self.weights_base_dir, idx, self.weights_zstats
+        )
+        delta_weights /= self.weight_scaling_factor
+        delta_loss = self.get_delta_param(
+            self.loss_base_dir, idx, self.loss_zstats)
         return delta_weights, delta_loss
 
     @torch.no_grad()
-    def get_delta_param(self, dir: str, idx: int) -> torch.Tensor:
+    def get_delta_param(self, dir: str, idx: int, zstats: ZStats) -> torch.Tensor:
         file_path = os.path.join(dir, f"ckpt.{idx}")
-        return torch.load(file_path)
+        val = torch.load(file_path)
+        val = (val - zstats.mean) / zstats.std
+        val = torch.nan_to_num(val, nan=0, posinf=0, neginf=0)
+        return val
+
+    @property
+    @torch.no_grad()
+    def num_epochs(self) -> int:
+        return int(np.ceil(np.log(self.weights_zstats.num_params / len(self))))
+
+
+class ZStatsComputer:
+    def __init__(self):
+        self.sum_x = None
+        self.sum_x_squared = None
+        self.num_items = 0
+        self.num_params = 0
+        self.mean_ = None
+        self.std_ = None
+
+    @torch.no_grad()
+    def add(self, x: torch.Tensor):
+        if self.sum_x is None:
+            self.num_params = torch.numel(x)
+            self.sum_x = torch.zeros_like(x)
+            self.sum_x_squared = torch.zeros_like(x)
+        self.sum_x += x
+        self.sum_x_squared += torch.square(x)
+        self.num_items += 1
+
+    @property
+    @torch.no_grad()
+    def mean(self) -> torch.Tensor:
+        if self.mean_ is None:
+            self.mean_ = self.sum_x / self.num_items
+        return self.mean_
+
+    @property
+    @torch.no_grad()
+    def std(self) -> torch.Tensor:
+        if self.std_ is None:
+            variance = (self.sum_x_squared / self.num_items) - \
+                torch.square(self.mean)
+            std_dev = torch.sqrt(variance)
+            self.std_ = std_dev
+        return self.std_
 
 
 class DeltaComputer:
@@ -57,6 +128,7 @@ class DeltaComputer:
         self.first_tensor = None
         self.second_tensor = None
         self.transform = transform
+        self.zstats_computer = ZStatsComputer()
 
     @torch.no_grad()
     def add_first(self, weight: torch.Tensor):
@@ -71,7 +143,9 @@ class DeltaComputer:
         if self.first_tensor is None or self.second_tensor is None:
             return None
         delta = self.second_tensor - self.first_tensor
-        return self.transform(delta)
+        result = self.transform(delta)
+        self.zstats_computer.add(result)
+        return result
 
 
 @dataclass
@@ -188,6 +262,7 @@ class SGDPruner(Pruner):
             concurrent.futures.wait(self.checkpoint_futures)
             del self.checkpoint_futures
             self.checkpoint_futures = []
+            self._write_zscaling_params()
         self.fabric.barrier()
 
         self.trainer = get_causal_weights_trainer(
@@ -248,3 +323,25 @@ class SGDPruner(Pruner):
 
     def _get_checkpoint_path(self, checkpoint_dir: str) -> str:
         return os.path.join(checkpoint_dir, f"ckpt.{self.counter}")
+
+    def _write_zscaling_params(self):
+        self._write_zscaling_params_from_computer(
+            self.delta_loss_computer, self.loss_dir
+        )
+        self._write_zscaling_params_from_computer(
+            self.delta_weights_computer, self.weights_dir
+        )
+
+    def _write_zscaling_params_from_computer(
+        self, computer: DeltaComputer, dir_path: str
+    ):
+        dir_path = os.path.join(dir_path, _ZSTATS_PATTERN)
+        zstats_computer = computer.zstats_computer
+        torch.save(
+            {
+                "num_params": zstats_computer.num_params,
+                "mean": zstats_computer.mean,
+                "std": zstats_computer.std,
+            },
+            dir_path,
+        )

@@ -269,8 +269,8 @@ class Trainer:
         epoch_config = self.epoch_config
         num_batches_in_epoch = epoch_config.num_batches_in_epoch
         tqdm_update_frequency = epoch_config.tqdm_update_frequency
-        self.config.train_optimizer.load_state_dict(
-            self.train_optimizer_init_state)
+        # self.config.train_optimizer.load_state_dict(
+        #     self.train_optimizer_init_state)
         for epoch in range(epoch_config.num_train_epochs_before_pruning):
             self.global_step += 1
             self.pbar.update(1)
@@ -453,9 +453,12 @@ class Trainer:
         )
 
     def _run_training(self):
+        epoch_config = self.epoch_config
+        if epoch_config.num_train_epochs <= 0:
+            return
         self._load_model(self.config.model_to_load_for_training)
-        self.config.train_optimizer.load_state_dict(
-            self.train_optimizer_init_state)
+        # self.config.train_optimizer.load_state_dict(
+        #     self.train_optimizer_init_state)
         config = self.config
         max_lr = config.max_train_lr
         if config.lrrt_config.enable:
@@ -468,7 +471,6 @@ class Trainer:
             f"Setting learning rate: {
                 get_optimizer_lr(config.train_optimizer):.1e}"
         )
-        epoch_config = self.epoch_config
         num_batches_in_epoch = epoch_config.num_batches_in_epoch
         tqdm_update_frequency = epoch_config.tqdm_update_frequency
         best_loss = np.inf
