@@ -2,10 +2,10 @@ from .alexnet import get_alexnet
 from .lenet import get_lenet
 from .resnet import (
     get_resnet18,
-    get_resnet20,
     get_resnet50,
     get_resnet50_untrained,
 )
+from .resnet_cifar import get_resnet20
 
 import torch.nn as nn
 
@@ -24,5 +24,4 @@ def get_model(model_name: str, dataset_name: str) -> nn.Module:
         return get_resnet50(dataset_name)
     elif model_name == "resnet50_untrained":
         return get_resnet50_untrained(dataset_name)
-    raise NotImplementedError(
-        f"{model_name} is not implemented in the test suite")
+    raise NotImplementedError(f"{model_name} is not implemented in the test suite")

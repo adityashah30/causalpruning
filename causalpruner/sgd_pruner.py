@@ -31,7 +31,7 @@ class ZStats:
 
 
 class ParamDataset(Dataset):
-    def __init__(self, weights_base_dir: str, loss_base_dir: str):
+    def __init__(self, weights_base_dir: str, loss_base_dir: str, use_zscaling: bool):
         self.weights_base_dir = weights_base_dir
         self.loss_base_dir = loss_base_dir
         file_pattern = "ckpt.*"
@@ -39,6 +39,7 @@ class ParamDataset(Dataset):
             len(glob.glob(file_pattern, root_dir=self.weights_base_dir)),
             len(glob.glob(file_pattern, root_dir=self.loss_base_dir)),
         )
+        self.use_zscaling = use_zscaling
         self.weights_zstats = self._load_zstats(self.weights_base_dir)
         self.weight_scaling_factor = np.sqrt(self.weights_zstats.num_params)
         self.loss_zstats = self._load_zstats(self.loss_base_dir)
@@ -62,16 +63,17 @@ class ParamDataset(Dataset):
         delta_weights = self.get_delta_param(
             self.weights_base_dir, idx, self.weights_zstats
         )
-        delta_weights /= self.weight_scaling_factor
-        delta_loss = self.get_delta_param(
-            self.loss_base_dir, idx, self.loss_zstats)
+        if self.use_zscaling:
+            delta_weights /= self.weight_scaling_factor
+        delta_loss = self.get_delta_param(self.loss_base_dir, idx, self.loss_zstats)
         return delta_weights, delta_loss
 
     @torch.no_grad()
     def get_delta_param(self, dir: str, idx: int, zstats: ZStats) -> torch.Tensor:
         file_path = os.path.join(dir, f"ckpt.{idx}")
         val = torch.load(file_path)
-        val = (val - zstats.mean) / zstats.std
+        if self.use_zscaling:
+            val = (val - zstats.mean) / zstats.std
         val = torch.nan_to_num(val, nan=0, posinf=0, neginf=0)
         return val
 
@@ -111,8 +113,7 @@ class ZStatsComputer:
     @torch.no_grad()
     def std(self) -> torch.Tensor:
         if self.std_ is None:
-            variance = (self.sum_x_squared / self.num_items) - \
-                torch.square(self.mean)
+            variance = (self.sum_x_squared / self.num_items) - torch.square(self.mean)
             std_dev = torch.sqrt(variance)
             self.std_ = std_dev
         return self.std_
@@ -155,6 +156,7 @@ class SGDPrunerConfig(PrunerConfig):
     pin_memory: bool
     threaded_checkpoint_writer: bool
     delete_checkpoint_dir_after_training: bool
+    use_zscaling: bool
     trainer_config: CausalWeightsTrainerConfig
 
 
@@ -173,6 +175,7 @@ class SGDPruner(Pruner):
             )
             self.num_params += self.params_to_dims[param]
         self.trainer_config = config.trainer_config
+        self.verbose = config.verbose
 
     @torch.no_grad()
     def start_iteration(self):
@@ -181,8 +184,7 @@ class SGDPruner(Pruner):
             self.weights_checkpoint_dir, f"{self.iteration}"
         )
         self.delta_weights_computer = DeltaComputer(transform=torch.square)
-        self.loss_dir = os.path.join(
-            self.loss_checkpoint_dir, f"{self.iteration}")
+        self.loss_dir = os.path.join(self.loss_checkpoint_dir, f"{self.iteration}")
         self.delta_loss_computer = DeltaComputer()
         self.checkpoint_futures = []
         self.counter = 0
@@ -228,8 +230,7 @@ class SGDPruner(Pruner):
 
         delta_loss = self.delta_loss_computer.get_delta()
         if delta_loss is not None:
-            self.write_tensor(
-                delta_loss, self._get_checkpoint_path(self.loss_dir))
+            self.write_tensor(delta_loss, self._get_checkpoint_path(self.loss_dir))
 
         delta_weights = self.delta_weights_computer.get_delta()
         if delta_weights is not None:
@@ -266,10 +267,15 @@ class SGDPruner(Pruner):
         self.fabric.barrier()
 
         self.trainer = get_causal_weights_trainer(
-            self.trainer_config, self.num_params, self.get_flattened_mask()
+            self.trainer_config,
+            self.num_params,
+            self.get_flattened_mask(),
+            self.verbose,
         )
 
-        dataset = ParamDataset(self.weights_dir, self.loss_dir)
+        dataset = ParamDataset(
+            self.weights_dir, self.loss_dir, self.config.use_zscaling
+        )
 
         batch_size = self.config.batch_size
         if batch_size < 0 or not self.trainer.supports_batch_training():

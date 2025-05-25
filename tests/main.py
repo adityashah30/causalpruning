@@ -8,12 +8,16 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../"
 
 import argparse
 import shutil
-from typing import Optional
 
 from lightning.fabric import Fabric
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.optim.lr_scheduler import (
+    CosineAnnealingLR,
+    LRScheduler,
+    OneCycleLR,
+)
 from torchvision.transforms import v2
 
 from causalpruner import (
@@ -23,8 +27,8 @@ from causalpruner import (
     SGDPruner,
     SGDPrunerConfig,
 )
-from models import get_model
 from datasets import get_dataset
+from models import get_model
 from pruner.mag_pruner import (
     MagPruner,
     MagPrunerConfig,
@@ -32,7 +36,6 @@ from pruner.mag_pruner import (
 from trainer import (
     DataConfig,
     EpochConfig,
-    LRRangeFinderConfig,
     Pruner,
     Trainer,
     TrainerConfig,
@@ -64,6 +67,60 @@ def get_train_optimizer(name: str, model: nn.Module, lr: float) -> optim.Optimiz
     elif name == "sgd_momentum":
         return optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=5e-4)
     raise NotImplementedError(f"{name} is not a supported post-prune Optimizier")
+
+
+def _calculate_total_epochs(epoch_config: EpochConfig) -> int:
+    num_epochs = (
+        epoch_config.num_pre_prune_epochs
+        + (
+            (epoch_config.num_prune_iterations - 1)
+            * epoch_config.num_train_epochs_before_pruning
+        )
+        + epoch_config.num_train_epochs
+    )
+    return num_epochs
+
+
+def _calculate_total_steps(epoch_config: EpochConfig, data_config: DataConfig) -> int:
+    num_items = len(data_config.train_dataset)
+    batch_size = data_config.batch_size
+    num_epochs = _calculate_total_epochs(epoch_config)
+    num_batches_in_epoch = epoch_config.num_batches_in_epoch
+
+    num_batches = (num_items + batch_size - 1) // batch_size
+    if num_batches_in_epoch <= 0:
+        num_batches_in_epoch = num_batches
+
+    total_steps = num_epochs * num_batches_in_epoch
+    return total_steps
+
+
+def create_lr_scheduler(
+    lr_scheduler: str,
+    optimizer: optim.Optimizer,
+    epoch_config: EpochConfig,
+    data_config: DataConfig,
+    train_lr: float,
+    max_train_lr: float,
+) -> LRScheduler:
+    lr_scheduler = lr_scheduler.lower()
+    if lr_scheduler == "onecycle":
+        total_steps = _calculate_total_steps(epoch_config, data_config)
+        lr_scheduler = OneCycleLR(
+            optimizer,
+            max_lr=max_train_lr,
+            total_steps=total_steps,
+            pct_start=0.3,
+            anneal_strategy="cos",
+            div_factor=max_train_lr / train_lr,
+            final_div_factor=10**4,
+        )
+        return lr_scheduler
+    elif lr_scheduler == "cosineannealing":
+        total_steps = _calculate_total_epochs(epoch_config)
+        lr_scheduler = CosineAnnealingLR(optimizer, T_max=total_steps)
+        return lr_scheduler
+    return None
 
 
 def get_pruner(pruner_config: PrunerConfig) -> Pruner:
@@ -159,40 +216,35 @@ def main(args):
         if args.prune
         else 0,
         num_prune_epochs=args.num_prune_epochs if args.prune else 0,
-        num_train_epochs=args.max_train_epochs,
+        num_train_epochs=args.num_train_epochs,
         num_batches_in_epoch=args.num_batches_in_epoch,
         tqdm_update_frequency=args.tqdm_update_frequency,
     )
-    lrrt_config = LRRangeFinderConfig(
-        enable=args.run_lrrt,
-        min_lr=args.lrrt_min_lr,
-        max_lr=args.lrrt_max_lr,
-        num_steps=args.lrrt_num_steps,
-        ewa_alpha=args.lrrt_ewa_alpha,
-    )
-    early_stopping = args.early_stopping
-    if args.use_one_cycle_lr_scheduler:
-        early_stopping = False
+    lr_scheduler = None
+    if args.lr_scheduler != "":
+        lr_scheduler = create_lr_scheduler(
+            args.lr_scheduler,
+            train_optimizer,
+            epoch_config,
+            data_config,
+            args.train_lr,
+            args.max_train_lr,
+        )
     trainer_config = TrainerConfig(
         hparams=vars(args),
         fabric=fabric,
         model=model,
         prune_optimizer=prune_optimizer,
         train_optimizer=train_optimizer,
-        lrrt_config=lrrt_config,
-        early_stopping=early_stopping,
-        train_convergence_loss_tolerance=args.train_convergence_loss_tolerance,
-        train_loss_num_epochs_no_change=args.train_loss_num_epochs_no_change,
         data_config=data_config,
         epoch_config=epoch_config,
         tensorboard_dir=tensorboard_dir,
         checkpoint_dir=checkpoint_dir,
+        lr_scheduler=lr_scheduler,
         verbose=args.verbose,
         train_only=args.train_only,
         model_to_load_for_training=args.model_to_load_for_training,
         model_to_save_after_training=args.model_to_save_after_training,
-        use_one_cycle_lr_scheduler=args.use_one_cycle_lr_scheduler,
-        max_train_lr=args.max_train_lr,
     )
     pruner = None
     if args.prune:
@@ -223,10 +275,12 @@ def main(args):
                 eval_after_epoch=args.eval_after_epoch,
                 reset_weights=args.reset_weights_after_pruning,
                 batch_size=args.causal_pruner_batch_size,
+                verbose=args.verbose,
                 num_dataloader_workers=args.num_causal_pruner_dataloader_workers,
                 pin_memory=args.causal_pruner_pin_memory,
                 threaded_checkpoint_writer=args.causal_pruner_threaded_checkpoint_writer,
                 delete_checkpoint_dir_after_training=args.delete_checkpoint_dir_after_training,
+                use_zscaling=args.causal_pruner_use_zscaling,
                 trainer_config=causal_weights_trainer_config,
             )
         elif args.pruner == "magpruner":
@@ -239,6 +293,7 @@ def main(args):
                 eval_after_epoch=args.eval_after_epoch,
                 reset_weights=args.reset_weights_after_pruning,
                 prune_amount=prune_amount_per_iteration,
+                verbose=args.verbose,
             )
         pruner = get_pruner(pruner_config)
     trainer = Trainer(trainer_config, pruner)
@@ -277,7 +332,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         type=str,
-        choices=["alexnet", "lenet", "resnet18", "resnet50", "resnet50_untrained"],
+        choices=[
+            "alexnet",
+            "lenet",
+            "resnet18",
+            "resnet20",
+            "resnet50",
+            "resnet50_untrained",
+        ],
         default="lenet",
         help="Model name",
     )
@@ -288,25 +350,7 @@ def parse_args() -> argparse.Namespace:
         help="Compile the model for faster execution.",
     )
     parser.add_argument(
-        "--early_stopping",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Stops training early if the loss stops decreasing. Disabled if one cycle LR is used though",
-    )
-    parser.add_argument(
-        "--train_convergence_loss_tolerance",
-        type=float,
-        default=1e-4,
-        help="Considers the model converged when train loss does not change by more than this value for train_loss_num_epochs_no_change",
-    )
-    parser.add_argument(
-        "--train_loss_num_epochs_no_change",
-        type=int,
-        default=5,
-        help="Considers the model converged when train loss does not change by more than train_convergence_loss_tolerance for these many epochs",
-    )
-    parser.add_argument(
-        "--max_train_epochs",
+        "--num_train_epochs",
         type=int,
         default=300,
         help="Maximum number of epochs for train the model",
@@ -328,34 +372,14 @@ def parse_args() -> argparse.Namespace:
         "--max_train_lr",
         type=float,
         default=0.1,
-        help="Maximum training learning rate to with OneCycleLR",
+        help="Maximum training learning rate to use with OneCycleLR",
     )
     parser.add_argument(
-        "--use_one_cycle_lr_scheduler",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Uses the one cycle lr scheduler when train_optimzier is either `sgd` or `sgd_momentum`",
-    )
-    parser.add_argument(
-        "--run_lrrt",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="Runs the Learning Rate Range Finder test if enabled",
-    )
-    parser.add_argument(
-        "--lrrt_max_lr", type=float, default=10.0, help="Max LR to use for LRRT"
-    )
-    parser.add_argument(
-        "--lrrt_min_lr", type=float, default=1e-7, help="Min LR to use for LRRT"
-    )
-    parser.add_argument(
-        "--lrrt_num_steps", type=int, default=1000, help="Number of steps to run LRRT"
-    )
-    parser.add_argument(
-        "--lrrt_ewa_alpha",
-        type=float,
-        default=0.98,
-        help="Smoothing factor used for LRRT",
+        "--lr_scheduler",
+        type=str,
+        default="onecycle",
+        choices=["", "onecycle", "cosineannealing"],
+        help="Use the LR scheduler when training",
     )
     parser.add_argument(
         "--train_only",
@@ -534,6 +558,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=30,
         help="Maximum number of iterations to run causal pruner training",
+    )
+    parser.add_argument(
+        "--causal_pruner_use_zscaling",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Controls whether causal pruner model uses zscaling or not",
     )
     parser.add_argument(
         "--causal_pruner_loss_tol",

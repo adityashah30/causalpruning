@@ -18,6 +18,7 @@ class PrunerConfig:
     start_clean: bool
     eval_after_epoch: bool
     reset_weights: bool
+    verbose: bool
 
 
 class Pruner(ABC):
@@ -83,8 +84,7 @@ class Pruner(ABC):
         self.checkpoint_dir = config.checkpoint_dir
         self.init_model_path = os.path.join(self.checkpoint_dir, "init.ckpt")
         self.loss_checkpoint_dir = os.path.join(self.checkpoint_dir, "loss")
-        self.weights_checkpoint_dir = os.path.join(
-            self.checkpoint_dir, "weights")
+        self.weights_checkpoint_dir = os.path.join(self.checkpoint_dir, "weights")
 
         # Setup directories on the global_rank = 0
         if self.fabric.is_global_zero:
@@ -140,8 +140,7 @@ class Pruner(ABC):
     @torch.no_grad()
     def start_pruning(self) -> None:
         if self.fabric.is_global_zero:
-            self.fabric.save(self.init_model_path, {
-                             "model": self.config.model})
+            self.fabric.save(self.init_model_path, {"model": self.config.model})
         self.fabric.barrier()
 
     @torch.no_grad()
@@ -152,8 +151,7 @@ class Pruner(ABC):
             iteration_name = f"{self.iteration}"
             loss_dir = os.path.join(self.loss_checkpoint_dir, iteration_name)
             os.makedirs(loss_dir, exist_ok=True)
-            weights_dir = os.path.join(
-                self.weights_checkpoint_dir, iteration_name)
+            weights_dir = os.path.join(self.weights_checkpoint_dir, iteration_name)
             os.makedirs(weights_dir, exist_ok=True)
         self.fabric.barrier()
 

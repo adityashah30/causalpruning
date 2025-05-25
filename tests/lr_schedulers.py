@@ -1,10 +1,10 @@
 from enum import Enum
 from typing import Any, Optional
 
-from torch.optim.lr_schedulers import (
+from torch.optim.lr_scheduler import (
     CosineAnnealingLR,
     LRScheduler,
-    StepLR,
+    OneCycleLR,
 )
 
 
@@ -19,8 +19,7 @@ class CausalPrunerLRScheduler(LRScheduler):
         self.lr_scheduler_type = lr_scheduler_type
 
     def step(self):
-        raise NotImplementedError(
-            "Use either step_after_batch or step_after_epoch")
+        raise NotImplementedError("Use either step_after_batch or step_after_epoch")
 
     def step_after_batch(self):
         if self.lr_scheduler_type == LRSchedulerType.APPLIED_AFTER_BATCH:
@@ -40,12 +39,13 @@ class CausalPrunerLRScheduler(LRScheduler):
         return self.lr_scheduler.state_dict()
 
 
-def get_lr_scheduler(name: str, *args, **kwargs) -> Optional[LRScheduler]:
-    name = name.lower()
-    if name == "steplr":
-        scheduler = StepLR(*args, **kwargs)
-        return CausalPrunerLRScheduler(scheduler, LRScheduler.APPLIED_AFTER_BATCH)
-    elif name == "cosineannealinglr":
-        scheduler = CosineAnnealingLR(*args, **kwargs)
-        return CausalPrunerLRScheduler(scheduler, LRScheduler.APPLIED_AFTER_EPOCH)
-    raise NotImplementedError(f"{name} is not a valid LRScheduler")
+def wrap_lr_scheduler(lr_scheduler: LRScheduler) -> Optional[CausalPrunerLRScheduler]:
+    if isinstance(lr_scheduler, OneCycleLR):
+        return CausalPrunerLRScheduler(
+            lr_scheduler, LRSchedulerType.APPLIED_AFTER_BATCH
+        )
+    elif isinstance(lr_scheduler, CosineAnnealingLR):
+        return CausalPrunerLRScheduler(
+            lr_scheduler, LRSchedulerType.APPLIED_AFTER_EPOCH
+        )
+    raise NotImplementedError("LRScheduler not supported")

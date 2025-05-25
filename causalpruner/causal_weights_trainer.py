@@ -95,10 +95,12 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
         config: CausalWeightsTrainerConfig,
         num_params: int,
         initial_mask: torch.Tensor,
+        verbose: bool,
     ):
         super().__init__(config)
         self.fabric = config.fabric
         self.num_params = num_params
+        self.verbose = verbose
         self.layer = nn.Linear(self.num_params, 1, bias=False)
         initialization = config.initialization.lower()
         if initialization == "zeros":
@@ -107,8 +109,6 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
             nn.init.xavier_normal_(self.layer.weight)
         mask = initial_mask.view_as(self.layer.weight)
         prune.custom_from_mask(self.layer, "weight", mask)
-        # self.l1_regularization_coeff = 1.0 / num_params
-        self.l2_regularization_coeff = self.l1_regularization_coeff
         self.optimizer = optim.SGD(
             self.layer.parameters(),
             lr=self.init_lr,
@@ -116,17 +116,10 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
             weight_decay=5e-4,
             nesterov=True,
         )
-        self.layer, self.optimizer = self.fabric.setup(
-            self.layer, self.optimizer)
+        self.layer, self.optimizer = self.fabric.setup(self.layer, self.optimizer)
 
     def supports_batch_training(self) -> bool:
         return True
-
-    def _l1_penalty(self) -> float:
-        return torch.norm(self.layer.weight, p=1)
-
-    def _l2_penalty(self) -> float:
-        return torch.norm(self.layer.weight, p=2)
 
     def fit(self, dataloader: DataLoader, num_epochs: int = -1) -> int:
         dataloader = self.fabric.setup_dataloaders(dataloader)
@@ -144,8 +137,7 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
         scheduler = lrrt.create_one_cycle_lr_scheduler(
             self.optimizer, best_lr / 10, best_lr, total_steps
         )
-        tqdm.write(f"Setting learning rate to {
-                   lrrt.get_optimizer_lr(self.optimizer)}")
+        tqdm.write(f"Setting learning rate to {lrrt.get_optimizer_lr(self.optimizer)}")
 
         conv_iter = self.max_iter
         for iter in trange(
@@ -157,11 +149,7 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
                 self.optimizer.zero_grad(set_to_none=True)
                 outputs = self.layer(X)
                 Y = Y.view(outputs.size())
-                loss = (
-                    F.mse_loss(outputs, Y, reduction="mean")
-                    # + self.l1_regularization_coeff * self._l1_penalty()
-                    # + self.l2_regularization_coeff * self._l2_penalty()
-                )
+                loss = F.mse_loss(outputs, Y, reduction="mean")
                 self.fabric.backward(loss)
                 self.optimizer.step()
                 scheduler.step()
@@ -173,10 +161,11 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
             num_loss = self.fabric.all_reduce(num_loss, reduce_op="sum")
             num_items = num_loss.item()
             loss = total_loss.item() / num_items
-            tqdm.write(
-                f"Pruning iter: {iter + 1}; " +
-                f"loss: {loss}; best_loss: {best_loss}"
-            )
+            if self.verbose:
+                tqdm.write(
+                    f"Pruning iter: {iter + 1}; "
+                    + f"loss: {loss}; best_loss: {best_loss}"
+                )
             if loss > (best_loss - self.loss_tol):
                 iter_no_change += 1
             else:
