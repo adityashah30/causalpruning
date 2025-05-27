@@ -139,7 +139,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         type=str,
-        choices=["lenet", "alexnet", "resnet18", "resnet50"],
+        choices=["lenet", "alexnet", "resnet18", "resnet20", "resnet50"],
         help="Model name",
     )
     parser.add_argument(
