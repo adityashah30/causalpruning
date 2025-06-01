@@ -284,7 +284,7 @@ class Trainer:
         num_batches_in_epoch = epoch_config.num_batches_in_epoch
         tqdm_update_frequency = epoch_config.tqdm_update_frequency
         self.pruner.start_iteration()
-        init_model_state = copy.deepcopy(config.model.state_dict())
+        # init_model_state = copy.deepcopy(config.model.state_dict())
         for epoch in range(epoch_config.num_prune_epochs):
             self.global_step += 1
             self.pbar.update(1)
@@ -312,7 +312,7 @@ class Trainer:
                     outputs = config.model(inputs)
                     loss = config.loss_fn(outputs, labels)
                     self.pruner.provide_loss_after_step(loss.item())
-                config.model.load_state_dict(init_model_state)
+                # config.model.load_state_dict(init_model_state)
                 if (batch_counter + 1) % tqdm_update_frequency == 0:
                     pbar.update(tqdm_update_frequency)
                 if num_batches_in_epoch > 0 and batch_counter >= num_batches_in_epoch:
