@@ -335,6 +335,7 @@ def parse_args() -> argparse.Namespace:
         choices=[
             "alexnet",
             "lenet",
+            "mlpnet",
             "resnet18",
             "resnet20",
             "resnet50",
@@ -403,7 +404,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset",
         type=str,
-        choices=["cifar10", "fashionmnist", "imagenet", "tinyimagenet"],
+        choices=["cifar10", "fashionmnist", "imagenet", "mnist", "tinyimagenet"],
         default="cifar10",
         help="Dataset name",
     )

@@ -37,4 +37,4 @@ def get_fashion_mnist(
             fashionmnist_root_dir, train=False, download=True, transform=transform
         )
         return (train, test)
-    raise NotImplementedError(f"CIFAR10 not available for {model_name}")
+    raise NotImplementedError(f"FashionMNIST not available for {model_name}")
