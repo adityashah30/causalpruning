@@ -1,6 +1,7 @@
 from .cifar10 import get_cifar_10
 from .fashion_mnist import get_fashion_mnist
 from .imagenet import get_imagenet
+from .mnist import get_mnist
 from .tinyimagenet import get_tiny_imagenet
 
 import torch
@@ -18,6 +19,9 @@ def get_dataset(
         return (train, test, 10)
     elif dataset_name == "fashionmnist":
         train, test = get_fashion_mnist(model_name, data_root_dir)
+        return (train, test, 10)
+    elif dataset_name == "mnist":
+        train, test = get_mnist(model_name, data_root_dir)
         return (train, test, 10)
     elif dataset_name == "tinyimagenet":
         train, test = get_tiny_imagenet(model_name, data_root_dir)

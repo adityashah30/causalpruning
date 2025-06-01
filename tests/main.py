@@ -272,7 +272,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         type=str,
-        choices=["alexnet", "lenet", "resnet18", "resnet50", "resnet50_untrained"],
+        choices=[
+            "alexnet",
+            "lenet",
+            "mlpnet",
+            "resnet18",
+            "resnet20",
+            "resnet50",
+            "resnet50_untrained",
+        ],
         default="lenet",
         help="Model name",
     )
@@ -368,7 +376,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset",
         type=str,
-        choices=["cifar10", "fashionmnist", "imagenet", "tinyimagenet"],
+        choices=["cifar10", "fashionmnist", "imagenet", "mnist", "tinyimagenet"],
         default="cifar10",
         help="Dataset name",
     )
