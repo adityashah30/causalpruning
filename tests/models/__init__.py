@@ -1,6 +1,7 @@
 from .alexnet import get_alexnet
 from .lenet import get_lenet
 from .mlpnet import get_mlpnet
+from .mobilenet import get_mobilenet
 from .resnet import (
     get_resnet18,
     get_resnet50,
@@ -19,6 +20,8 @@ def get_model(model_name: str, dataset_name: str) -> nn.Module:
         return get_alexnet(dataset_name)
     elif model_name == "mlpnet":
         return get_mlpnet(dataset_name)
+    elif model_name == "mobilenet":
+        return get_mobilenet(dataset_name)
     elif model_name == "resnet18":
         return get_resnet18(dataset_name)
     elif model_name == "resnet20":

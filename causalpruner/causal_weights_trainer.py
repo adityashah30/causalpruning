@@ -95,6 +95,8 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
         config: CausalWeightsTrainerConfig,
         num_params: int,
         initial_mask: torch.Tensor,
+        prune_iteration: int,
+        num_prune_iterations: int,
         verbose: bool,
     ):
         super().__init__(config)
@@ -117,11 +119,39 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
             nesterov=True,
         )
         self.layer, self.optimizer = self.fabric.setup(self.layer, self.optimizer)
+        self.prune_amount_this_iteration = self._compute_current_prune_amount(
+            prune_iteration, num_prune_iterations, self.prune_amount
+        )
+
+    def _compute_current_prune_amount(
+        self,
+        prune_iteration: int,
+        num_prune_iterations: int,
+        total_prune_amount: float,
+    ) -> float:
+        target_prune_amount_this_iteration = self._compute_target_prune_amount(
+            prune_iteration, num_prune_iterations, total_prune_amount
+        )
+        N = 1.0 - target_prune_amount_this_iteration
+        target_prune_amount_last_iteration = self._compute_target_prune_amount(
+            prune_iteration - 1, num_prune_iterations, total_prune_amount
+        )
+        M = 1.0 - target_prune_amount_last_iteration
+        return (M - N) / M
+
+    def _compute_target_prune_amount(
+        self, prune_iteration: int, num_prune_iterations: int, total_prune_amount: float
+    ) -> float:
+        return total_prune_amount * (
+            1 - (1 - prune_iteration / num_prune_iterations) ** 3
+        )
 
     def supports_batch_training(self) -> bool:
         return True
 
     def fit(self, dataloader: DataLoader, num_epochs: int = -1) -> int:
+        tqdm.write(f"Prune amount this iteration: {self.prune_amount_this_iteration}")
+
         dataloader = self.fabric.setup_dataloaders(dataloader)
         self.layer.train()
 
@@ -178,7 +208,7 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
                 break
         self.layer.load_state_dict(best_model_state)
         prune.l1_unstructured(
-            self.layer.module, name="weight", amount=self.prune_amount
+            self.layer.module, name="weight", amount=self.prune_amount_this_iteration
         )
         return conv_iter
 

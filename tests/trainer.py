@@ -17,7 +17,12 @@ import torchmetrics
 from tqdm.auto import tqdm
 
 from causalpruner import Pruner
-from lr_schedulers import wrap_lr_scheduler
+from causalpruner.lrrt import set_optimizer_lr
+from lr_schedulers import (
+    LrSchedulerConfig,
+    create_lr_scheduler,
+    wrap_lr_scheduler,
+)
 from test_utils import (
     AverageMeter,
     EvalMetrics,
@@ -84,7 +89,7 @@ class TrainerConfig:
     epoch_config: EpochConfig
     tensorboard_dir: str
     checkpoint_dir: str
-    lr_scheduler: Optional[LRScheduler] = None
+    lr_scheduler_config: LrSchedulerConfig
     loss_fn: Callable = partial(F.cross_entropy, label_smoothing=0.1)
     verbose: bool = True
     train_only: bool = False
@@ -101,9 +106,7 @@ class Trainer:
         self.data_config = config.data_config
         self.epoch_config = config.epoch_config
         self.total_epochs = self.epoch_config.num_train_epochs
-        self.lr_scheduler = None
-        if config.lr_scheduler is not None:
-            self.lr_scheduler = wrap_lr_scheduler(config.lr_scheduler)
+        self.lr_scheduler_config = config.lr_scheduler_config
         if not config.train_only:
             self.total_epochs += (
                 self.epoch_config.num_pre_prune_epochs
@@ -189,11 +192,13 @@ class Trainer:
         epoch_config = self.config.epoch_config
         if self._should_prune():
             tqdm.write(f"Pruning method: {self.pruner}")
-            self._run_training(epoch_config.num_pre_prune_epochs, "Pre-Prune")
+            self._run_training(
+                epoch_config.num_pre_prune_epochs, "Training before Pruning"
+            )
             self._run_prune()
         self._run_training(
             epoch_config.num_train_epochs,
-            "Post-Prune",
+            "Training after Pruning",
             self.config.model_to_load_for_training,
             self.config.model_to_save_after_training,
         )
@@ -205,7 +210,8 @@ class Trainer:
         for iteration in range(epoch_config.num_prune_iterations):
             if iteration > 0:
                 self._run_training(
-                    epoch_config.num_train_epochs_before_pruning, "Pruning"
+                    epoch_config.num_train_epochs_before_pruning,
+                    f"Training while Pruning {iteration}",
                 )
             self._run_prune_iteration(iteration)
             self._checkpoint_model(f"prune.{iteration}")
@@ -228,6 +234,17 @@ class Trainer:
         tqdm_update_frequency = epoch_config.tqdm_update_frequency
         best_loss = np.inf
         best_accuracy = -np.inf
+        lr_scheduler = None
+        lr_scheduler_config = copy.deepcopy(self.lr_scheduler_config)
+        lr_scheduler_config.num_epochs = num_epochs
+        lr_scheduler_config.num_batches = len(self.trainloader)
+        if lr_scheduler_config.name != "":
+            set_optimizer_lr(config.train_optimizer, lr_scheduler_config.train_lr)
+            lr_scheduler = create_lr_scheduler(
+                lr_scheduler_config,
+                config.train_optimizer,
+            )
+            lr_scheduler = wrap_lr_scheduler(lr_scheduler)
         for epoch in range(num_epochs):
             self.global_step += 1
             self.pbar.update(1)
@@ -247,15 +264,15 @@ class Trainer:
                 self.fabric.backward(loss)
                 config.train_optimizer.step()
                 loss_avg.update(loss.item())
-                if self.lr_scheduler is not None:
-                    self.lr_scheduler.step_after_batch()
+                if lr_scheduler is not None:
+                    lr_scheduler.step_after_batch()
                 if (batch_counter + 1) % tqdm_update_frequency == 0:
                     pbar.update(tqdm_update_frequency)
                 if num_batches_in_epoch > 0 and batch_counter >= num_batches_in_epoch:
                     break
             pbar.close()
-            if self.lr_scheduler is not None:
-                self.lr_scheduler.step_after_epoch()
+            if lr_scheduler is not None:
+                lr_scheduler.step_after_epoch()
             total_loss = torch.tensor([loss_avg.sum])
             total_loss = self.fabric.all_reduce(total_loss, reduce_op="sum")
             num_loss = torch.tensor([loss_avg.count])

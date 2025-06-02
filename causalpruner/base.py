@@ -18,6 +18,7 @@ class PrunerConfig:
     start_clean: bool
     eval_after_epoch: bool
     reset_weights: bool
+    num_prune_iterations: int
     verbose: bool
 
 

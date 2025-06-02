@@ -13,11 +13,6 @@ from lightning.fabric import Fabric
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.optim.lr_scheduler import (
-    CosineAnnealingLR,
-    LRScheduler,
-    OneCycleLR,
-)
 from torchvision.transforms import v2
 
 from causalpruner import (
@@ -28,6 +23,7 @@ from causalpruner import (
     SGDPrunerConfig,
 )
 from datasets import get_dataset
+from lr_schedulers import LrSchedulerConfig
 from models import get_model
 from pruner.mag_pruner import (
     MagPruner,
@@ -36,7 +32,6 @@ from pruner.mag_pruner import (
 from trainer import (
     DataConfig,
     EpochConfig,
-    Pruner,
     Trainer,
     TrainerConfig,
 )
@@ -67,60 +62,6 @@ def get_train_optimizer(name: str, model: nn.Module, lr: float) -> optim.Optimiz
     elif name == "sgd_momentum":
         return optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=5e-4)
     raise NotImplementedError(f"{name} is not a supported post-prune Optimizier")
-
-
-def _calculate_total_epochs(epoch_config: EpochConfig) -> int:
-    num_epochs = (
-        epoch_config.num_pre_prune_epochs
-        + (
-            (epoch_config.num_prune_iterations - 1)
-            * epoch_config.num_train_epochs_before_pruning
-        )
-        + epoch_config.num_train_epochs
-    )
-    return num_epochs
-
-
-def _calculate_total_steps(epoch_config: EpochConfig, data_config: DataConfig) -> int:
-    num_items = len(data_config.train_dataset)
-    batch_size = data_config.batch_size
-    num_epochs = _calculate_total_epochs(epoch_config)
-    num_batches_in_epoch = epoch_config.num_batches_in_epoch
-
-    num_batches = (num_items + batch_size - 1) // batch_size
-    if num_batches_in_epoch <= 0:
-        num_batches_in_epoch = num_batches
-
-    total_steps = num_epochs * num_batches_in_epoch
-    return total_steps
-
-
-def create_lr_scheduler(
-    lr_scheduler: str,
-    optimizer: optim.Optimizer,
-    epoch_config: EpochConfig,
-    data_config: DataConfig,
-    train_lr: float,
-    max_train_lr: float,
-) -> LRScheduler:
-    lr_scheduler = lr_scheduler.lower()
-    if lr_scheduler == "onecycle":
-        total_steps = _calculate_total_steps(epoch_config, data_config)
-        lr_scheduler = OneCycleLR(
-            optimizer,
-            max_lr=max_train_lr,
-            total_steps=total_steps,
-            pct_start=0.3,
-            anneal_strategy="cos",
-            div_factor=max_train_lr / train_lr,
-            final_div_factor=10**4,
-        )
-        return lr_scheduler
-    elif lr_scheduler == "cosineannealing":
-        total_steps = _calculate_total_epochs(epoch_config)
-        lr_scheduler = CosineAnnealingLR(optimizer, T_max=total_steps)
-        return lr_scheduler
-    return None
 
 
 def get_pruner(pruner_config: PrunerConfig) -> Pruner:
@@ -220,16 +161,13 @@ def main(args):
         num_batches_in_epoch=args.num_batches_in_epoch,
         tqdm_update_frequency=args.tqdm_update_frequency,
     )
-    lr_scheduler = None
-    if args.lr_scheduler != "":
-        lr_scheduler = create_lr_scheduler(
-            args.lr_scheduler,
-            train_optimizer,
-            epoch_config,
-            data_config,
-            args.train_lr,
-            args.max_train_lr,
-        )
+    lr_scheduler_config = LrSchedulerConfig(
+        name=args.lr_scheduler,
+        train_lr=args.train_lr,
+        max_train_lr=args.max_train_lr,
+        num_epochs=-1,
+        num_batches=-1,
+    )
     trainer_config = TrainerConfig(
         hparams=vars(args),
         fabric=fabric,
@@ -240,7 +178,7 @@ def main(args):
         epoch_config=epoch_config,
         tensorboard_dir=tensorboard_dir,
         checkpoint_dir=checkpoint_dir,
-        lr_scheduler=lr_scheduler,
+        lr_scheduler_config=lr_scheduler_config,
         verbose=args.verbose,
         train_only=args.train_only,
         model_to_load_for_training=args.model_to_load_for_training,
@@ -249,18 +187,13 @@ def main(args):
     pruner = None
     if args.prune:
         total_prune_amount = args.total_prune_amount
-        num_prune_iterations = args.num_prune_iterations
-        prune_amount_per_iteration = 1 - (1 - total_prune_amount) ** (
-            1 / num_prune_iterations
-        )
-        print(f"Prune amount per iteration: {prune_amount_per_iteration}")
         if args.pruner == "causalpruner":
             causal_weights_trainer_config = CausalWeightsTrainerConfig(
                 fabric=fabric,
                 init_lr=args.causal_pruner_init_lr,
                 l1_regularization_coeff=args.causal_pruner_l1_regularization_coeff,
                 initialization=args.causal_pruner_weights_initialization,
-                prune_amount=prune_amount_per_iteration,
+                prune_amount=total_prune_amount,
                 max_iter=args.causal_pruner_max_iter,
                 loss_tol=args.causal_pruner_loss_tol,
                 num_iter_no_change=args.causal_pruner_num_iter_no_change,
@@ -274,6 +207,7 @@ def main(args):
                 start_clean=args.start_clean,
                 eval_after_epoch=args.eval_after_epoch,
                 reset_weights=args.reset_weights_after_pruning,
+                num_prune_iterations=args.num_prune_iterations,
                 batch_size=args.causal_pruner_batch_size,
                 verbose=args.verbose,
                 num_dataloader_workers=args.num_causal_pruner_dataloader_workers,
@@ -284,6 +218,10 @@ def main(args):
                 trainer_config=causal_weights_trainer_config,
             )
         elif args.pruner == "magpruner":
+            num_prune_iterations = args.num_prune_iterations
+            prune_amount_per_iteration = 1 - (1 - total_prune_amount) ** (
+                1 / num_prune_iterations
+            )
             pruner_config = MagPrunerConfig(
                 fabric=fabric,
                 model=model,
@@ -336,6 +274,7 @@ def parse_args() -> argparse.Namespace:
             "alexnet",
             "lenet",
             "mlpnet",
+            "mobilenet",
             "resnet18",
             "resnet20",
             "resnet50",
@@ -563,7 +502,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--causal_pruner_use_zscaling",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
         help="Controls whether causal pruner model uses zscaling or not",
     )
     parser.add_argument(

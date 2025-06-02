@@ -151,6 +151,7 @@ class DeltaComputer:
 
 @dataclass
 class SGDPrunerConfig(PrunerConfig):
+    num_prune_iterations: int
     batch_size: int
     num_dataloader_workers: int
     pin_memory: bool
@@ -270,6 +271,8 @@ class SGDPruner(Pruner):
             self.trainer_config,
             self.num_params,
             self.get_flattened_mask(),
+            self.iteration + 1,
+            self.config.num_prune_iterations,
             self.verbose,
         )
 

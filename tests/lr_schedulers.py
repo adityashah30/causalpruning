@@ -1,11 +1,23 @@
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional
+from tqdm.auto import tqdm
 
+from torch.optim import Optimizer
 from torch.optim.lr_scheduler import (
     CosineAnnealingLR,
     LRScheduler,
     OneCycleLR,
 )
+
+
+@dataclass
+class LrSchedulerConfig:
+    name: str
+    train_lr: float
+    max_train_lr: float
+    num_epochs: int
+    num_batches: int
 
 
 class LRSchedulerType(Enum):
@@ -28,6 +40,7 @@ class CausalPrunerLRScheduler(LRScheduler):
     def step_after_epoch(self):
         if self.lr_scheduler_type == LRSchedulerType.APPLIED_AFTER_EPOCH:
             self.lr_scheduler.step()
+        # tqdm.write(f"Setting learning rate to: {self.lr_scheduler.get_last_lr()}")
 
     def get_lr(self):
         return self.lr_scheduler.get_lr()
@@ -49,3 +62,30 @@ def wrap_lr_scheduler(lr_scheduler: LRScheduler) -> Optional[CausalPrunerLRSched
             lr_scheduler, LRSchedulerType.APPLIED_AFTER_EPOCH
         )
     raise NotImplementedError("LRScheduler not supported")
+
+
+def create_lr_scheduler(
+    config: LrSchedulerConfig,
+    optimizer: Optimizer,
+) -> LRScheduler:
+    lr_scheduler = config.name.lower()
+    if lr_scheduler == "onecycle":
+        max_lr = config.max_train_lr
+        train_lr = config.train_lr
+        total_steps = config.num_epochs * config.num_batches
+        lr_scheduler = OneCycleLR(
+            optimizer,
+            max_lr=max_lr,
+            total_steps=total_steps,
+            pct_start=0.1,
+            anneal_strategy="cos",
+            div_factor=max_lr / train_lr,
+            final_div_factor=10**4,
+        )
+        return lr_scheduler
+    elif lr_scheduler == "cosineannealing":
+        lr_scheduler = CosineAnnealingLR(
+            optimizer, T_max=config.num_epochs, eta_min=1e-5
+        )
+        return lr_scheduler
+    return None
