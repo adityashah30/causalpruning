@@ -1,5 +1,6 @@
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
+import copy
 from dataclasses import dataclass
 import glob
 import os
@@ -223,10 +224,11 @@ class SGDPruner(Pruner):
 
     @torch.no_grad()
     def get_flattened_weight(self) -> torch.Tensor:
-        def get_tensor(param):
-            return torch.flatten(self.modules_dict[param].weight.detach())
-
-        return torch.cat(tuple(map(get_tensor, self.params)))
+        weights = []
+        for param in self.params:
+            weight = self.modules_dict[param].weight.detach().clone()
+            weights.append(weight)
+        return torch.cat(tuple(map(torch.flatten, weights)))
 
     @torch.no_grad()
     def get_flattened_mask(self) -> torch.Tensor:

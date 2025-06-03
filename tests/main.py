@@ -117,14 +117,6 @@ def main(args):
     if args.start_clean:
         delete_dir_if_exists(checkpoint_dir)
         delete_dir_if_exists(tensorboard_dir)
-    train_dataset, test_dataset, num_classes = get_dataset(
-        dataset_name,
-        model_name,
-        args.dataset_root_dir,
-    )
-    collate_fn = get_collate_fn(
-        args.mixup_alpha, args.cutmix_alpha, num_classes=num_classes
-    )
     fabric = Fabric(
         devices=args.device_ids, accelerator="auto", precision=args.precision
     )
@@ -136,6 +128,14 @@ def main(args):
     train_optimizer = get_train_optimizer(args.train_optimizer, model, args.train_lr)
     model, prune_optimizer, train_optimizer = fabric.setup(
         model, prune_optimizer, train_optimizer
+    )
+    train_dataset, test_dataset, num_classes = get_dataset(
+        dataset_name,
+        model_name,
+        args.dataset_root_dir,
+    )
+    collate_fn = get_collate_fn(
+        args.mixup_alpha, args.cutmix_alpha, num_classes=num_classes
     )
     world_size = fabric.world_size
     batch_size = args.batch_size // world_size
