@@ -28,6 +28,8 @@ class ZStats:
     num_params: int
     mean: torch.Tensor
     std: torch.Tensor
+    global_mean: torch.Tensor
+    global_std: torch.Tensor
 
 
 class ParamDataset(Dataset):
@@ -49,6 +51,8 @@ class ParamDataset(Dataset):
         zstats_dict = torch.load(os.path.join(base_dir, _ZSTATS_PATTERN))
         zstats = ZStats(
             num_params=zstats_dict["num_params"],
+            global_mean=zstats_dict["global_mean"],
+            global_std=zstats_dict["global_std"],
             mean=zstats_dict["mean"],
             std=zstats_dict["std"],
         )
@@ -63,17 +67,17 @@ class ParamDataset(Dataset):
         delta_weights = self.get_delta_param(
             self.weights_base_dir, idx, self.weights_zstats
         )
-        if self.use_zscaling:
-            delta_weights /= self.weight_scaling_factor
-        delta_loss = self.get_delta_param(self.loss_base_dir, idx, self.loss_zstats)
+        delta_loss = self.get_delta_param(self.loss_base_dir, idx)
         return delta_weights, delta_loss
 
     @torch.no_grad()
-    def get_delta_param(self, dir: str, idx: int, zstats: ZStats) -> torch.Tensor:
+    def get_delta_param(
+        self, dir: str, idx: int, zstats: Optional[ZStats] = None
+    ) -> torch.Tensor:
         file_path = os.path.join(dir, f"ckpt.{idx}")
         val = torch.load(file_path)
-        if self.use_zscaling:
-            val = (val - zstats.mean) / zstats.std
+        if self.use_zscaling and zstats is not None:
+            val = (val - zstats.global_mean) / zstats.global_std
         val = torch.nan_to_num(val, nan=0, posinf=0, neginf=0)
         return val
 
@@ -91,6 +95,11 @@ class ZStatsComputer:
         self.num_params = 0
         self.mean_ = None
         self.std_ = None
+        self.global_sum_x = 0.0
+        self.global_sum_x_squared = 0.0
+        self.global_num_items = 0
+        self.global_mean_ = None
+        self.global_std_ = None
 
     @torch.no_grad()
     def add(self, x: torch.Tensor):
@@ -98,9 +107,13 @@ class ZStatsComputer:
             self.num_params = torch.numel(x)
             self.sum_x = torch.zeros_like(x)
             self.sum_x_squared = torch.zeros_like(x)
+        x_squared = torch.square(x)
         self.sum_x += x
-        self.sum_x_squared += torch.square(x)
+        self.sum_x_squared += x_squared
         self.num_items += 1
+        self.global_sum_x += torch.sum(x)
+        self.global_sum_x_squared += torch.sum(x_squared)
+        self.global_num_items += torch.count_nonzero(x)
 
     @property
     @torch.no_grad()
@@ -111,12 +124,30 @@ class ZStatsComputer:
 
     @property
     @torch.no_grad()
+    def global_mean(self) -> torch.Tensor:
+        if self.global_mean_ is None:
+            self.global_mean_ = self.global_sum_x / self.global_num_items
+        return self.global_mean_
+
+    @property
+    @torch.no_grad()
     def std(self) -> torch.Tensor:
         if self.std_ is None:
             variance = (self.sum_x_squared / self.num_items) - torch.square(self.mean)
             std_dev = torch.sqrt(variance)
             self.std_ = std_dev
         return self.std_
+
+    @property
+    @torch.no_grad()
+    def global_std(self) -> torch.Tensor:
+        if self.global_std_ is None:
+            variance = (
+                self.global_sum_x_squared / self.global_num_items
+            ) - torch.square(self.global_mean)
+            std_dev = torch.sqrt(variance)
+            self.global_std_ = std_dev
+        return self.global_std_
 
 
 class DeltaComputer:
@@ -193,9 +224,7 @@ class SGDPruner(Pruner):
     @torch.no_grad()
     def get_flattened_weight(self) -> torch.Tensor:
         def get_tensor(param):
-            return torch.flatten(self.modules_dict[param].weight.detach()).to(
-                "cpu", non_blocking=True
-            )
+            return torch.flatten(self.modules_dict[param].weight.detach())
 
         return torch.cat(tuple(map(get_tensor, self.params)))
 
@@ -206,26 +235,24 @@ class SGDPruner(Pruner):
             if not hasattr(param_module, "weight_mask"):
                 mask = torch.ones_like(param_module.weight)
             else:
-                mask = param_module.weight_mask
-            return torch.flatten(mask.detach().cpu())
+                mask = param_module.weight_mask.detach()
+            return torch.flatten(mask)
 
         return torch.cat(tuple(map(get_mask, self.params)))
 
     @torch.no_grad()
-    def provide_loss_before_step(self, loss: float) -> None:
+    def provide_loss_before_step(self, loss: torch.tensor) -> None:
         if not self.fabric.is_global_zero:
             return
 
-        loss = torch.tensor(loss)
         self.delta_loss_computer.add_first(loss)
         self.delta_weights_computer.add_first(self.get_flattened_weight())
 
     @torch.no_grad()
-    def provide_loss_after_step(self, loss: float) -> None:
+    def provide_loss_after_step(self, loss: torch.tensor) -> None:
         if not self.fabric.is_global_zero:
             return
 
-        loss = torch.tensor(loss)
         self.delta_loss_computer.add_second(loss)
         self.delta_weights_computer.add_second(self.get_flattened_weight())
 
@@ -284,13 +311,12 @@ class SGDPruner(Pruner):
         if batch_size < 0 or not self.trainer.supports_batch_training():
             batch_size = len(dataset)
         num_workers = self.config.num_dataloader_workers
-        pin_memory = self.config.pin_memory
 
         dataloader = DataLoader(
             dataset,
             batch_size=batch_size,
-            pin_memory=pin_memory,
-            shuffle=False,
+            pin_memory=False,
+            shuffle=True,
             num_workers=num_workers,
             persistent_workers=num_workers > 0,
         )
@@ -351,6 +377,8 @@ class SGDPruner(Pruner):
                 "num_params": zstats_computer.num_params,
                 "mean": zstats_computer.mean,
                 "std": zstats_computer.std,
+                "global_mean": zstats_computer.global_mean,
+                "global_std": zstats_computer.global_std,
             },
             dir_path,
         )

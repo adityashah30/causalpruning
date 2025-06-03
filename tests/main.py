@@ -11,6 +11,7 @@ import shutil
 
 from lightning.fabric import Fabric
 import torch
+import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.optim as optim
 from torchvision.transforms import v2
@@ -128,7 +129,7 @@ def main(args):
         devices=args.device_ids, accelerator="auto", precision=args.precision
     )
     fabric.launch()
-    model = get_model(model_name, dataset_name)
+    model = get_model(model_name, dataset_name, args.trained_checkpoint_dir)
     if args.compile_model:
         model = torch.compile(model)
     prune_optimizer = get_prune_optimizer(args.optimizer, model, args.lr)
@@ -274,14 +275,22 @@ def parse_args() -> argparse.Namespace:
             "alexnet",
             "lenet",
             "mlpnet",
-            "mobilenet",
+            "mobilenet_trained",
+            "mobilenet_untrained",
             "resnet18",
             "resnet20",
-            "resnet50",
+            "resnet50_torch",
+            "resnet50_trained",
             "resnet50_untrained",
         ],
-        default="lenet",
+        default="mlpnet",
         help="Model name",
+    )
+    parser.add_argument(
+        "--trained_checkpoint_dir",
+        type=str,
+        default="models/trained_checkpoints",
+        help="Directory containing trained model checkpoints",
     )
     parser.add_argument(
         "--compile_model",
@@ -343,7 +352,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset",
         type=str,
-        choices=["cifar10", "fashionmnist", "imagenet", "mnist", "tinyimagenet"],
+        choices=[
+            "cifar10",
+            "fashionmnist",
+            "imagenet",
+            "imagenet_memory",
+            "mnist",
+            "tinyimagenet",
+        ],
         default="cifar10",
         help="Dataset name",
     )
@@ -477,7 +493,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--causal_pruner_init_lr",
         type=float,
-        default=1e-2,
+        default=0.1,
         help="Learning rate for causal pruner",
     )
     parser.add_argument(
@@ -565,5 +581,6 @@ def parse_args() -> argparse.Namespace:
 
 
 if __name__ == "__main__":
+    mp.set_start_method("spawn")
     args = parse_args()
     main(args)

@@ -1,3 +1,4 @@
+import os
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.models import (
@@ -6,6 +7,7 @@ from torchvision.models import (
     ResNet18_Weights,
     ResNet50_Weights,
 )
+from tqdm.auto import tqdm
 
 
 def get_resnet18(dataset: str) -> nn.Module:
@@ -29,18 +31,40 @@ def get_resnet18(dataset: str) -> nn.Module:
     raise NotImplementedError(f"Resnet18 is not available for {dataset}")
 
 
-def get_resnet50(dataset: str) -> nn.Module:
+def get_resnet50_torch(dataset: str) -> nn.Module:
     dataset = dataset.lower()
-    if dataset == "imagenet":
+    if dataset in ["imagenet", "imagenet_memory"]:
         model = resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
         return model
-    raise NotImplementedError(f"Resnet50 is not available for {dataset}")
+    raise NotImplementedError(f"Resnet50 (torch) is not available for {dataset}")
+
+
+def get_resnet50_trained(dataset: str, checkpoint_dir: str) -> nn.Module:
+    dataset = dataset.lower()
+    if dataset in ["imagenet", "imagenet_memory"]:
+        model = resnet50()
+        checkpoint_path = os.path.join(checkpoint_dir, "resnet50.pth")
+        state_trained = torch.load(checkpoint_path, map_location=torch.device("cpu"))[
+            "state_dict"
+        ]
+        new_state_trained = model.state_dict()
+        for k in state_trained:
+            key = k[7:]
+            if key in new_state_trained:
+                new_state_trained[key] = state_trained[k].view(
+                    new_state_trained[key].size()
+                )
+            else:
+                print("Missing key", key)
+        model.load_state_dict(new_state_trained, strict=False)
+        tqdm.write("Loaded Resnet50 weights from {checkpoint_path}")
+        return model
+    raise NotImplementedError(f"Resnet50 (trained) is not available for {dataset}")
 
 
 def get_resnet50_untrained(dataset: str) -> nn.Module:
     dataset = dataset.lower()
-    if dataset == "imagenet":
+    if dataset in ["imagenet", "imagenet_memory"]:
         model = resnet50()
-        model = initialize_model_weights(model)
         return model
     raise NotImplementedError(f"Resnet50 (untrained) is not available for {dataset}")

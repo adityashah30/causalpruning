@@ -18,7 +18,6 @@ class PrunerConfig:
     start_clean: bool
     eval_after_epoch: bool
     reset_weights: bool
-    num_prune_iterations: int
     verbose: bool
 
 
@@ -131,11 +130,11 @@ class Pruner(ABC):
                     del module._forward_pre_hooks[k]
 
     @torch.no_grad()
-    def provide_loss_before_step(self, loss: float) -> None:
+    def provide_loss_before_step(self, loss: torch.tensor) -> None:
         pass
 
     @torch.no_grad()
-    def provide_loss_after_step(self, loss: float) -> None:
+    def provide_loss_after_step(self, loss: torch.tensor) -> None:
         pass
 
     @torch.no_grad()

@@ -1,23 +1,28 @@
 from dataclasses import dataclass
+from lightning import Fabric
 import torch
 import torchmetrics
 
 
 class AverageMeter:
-    def __init__(self):
+    def __init__(self, fabric: Fabric):
+        self.fabric = fabric
+        self.device = fabric.device
         self.reset()
 
     def reset(self):
-        self.val = 0.0
-        self.avg = 0.0
-        self.sum = 0.0
-        self.count = 0
+        self.sum = torch.tensor([0.0], device=self.device)
+        self.count = torch.tensor([0], device=self.device)
 
-    def update(self, val, n=1):
-        self.val = val
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count
+    def update(self, val: torch.Tensor):
+        self.sum += val
+        self.count += 1
+
+    def mean(self) -> float:
+        total_loss = self.fabric.all_reduce(self.sum, reduce_op="sum")
+        num_loss = self.fabric.all_reduce(self.count, reduce_op="sum")
+        mean = total_loss / num_loss
+        return mean.item()
 
 
 @dataclass

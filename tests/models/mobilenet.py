@@ -15,7 +15,10 @@
 #
 
 from math import floor
+import os
+import torch
 import torch.nn as nn
+from tqdm.auto import tqdm
 
 
 class MobileNet(nn.Module):
@@ -77,20 +80,31 @@ class MobileNet(nn.Module):
         return x
 
 
-def mobilenet_025():
-    return MobileNet(channel_multiplier=0.25)
-
-
-def mobilenet_050():
-    return MobileNet(channel_multiplier=0.5)
-
-
-def mobilenet_075():
-    return MobileNet(channel_multiplier=0.75)
-
-
-def get_mobilenet(dataset: str) -> nn.Module:
+def get_mobilenet_untrained(dataset: str) -> nn.Module:
     dataset = dataset.lower()
-    if dataset == "imagenet":
+    if dataset in ["imagenet", "imagenet_memory"]:
         return MobileNet()
-    raise NotImplementedError(f"MlpNet is not available for {dataset}")
+    raise NotImplementedError(f"MobileNet (untrained) is not available for {dataset}")
+
+
+def get_mobilenet_trained(dataset: str, checkpoint_dir: str) -> nn.Module:
+    dataset = dataset.lower()
+    if dataset in ["imagenet", "imagenet_memory"]:
+        model = MobileNet()
+        checkpoint_path = os.path.join(checkpoint_dir, "mobilenet.pth")
+        state_trained = torch.load(checkpoint_path, map_location=torch.device("cpu"))[
+            "state_dict"
+        ]
+        new_state_trained = model.state_dict()
+        for k in state_trained:
+            key = k[7:]
+            if key in new_state_trained:
+                new_state_trained[key] = state_trained[k].view(
+                    new_state_trained[key].size()
+                )
+            else:
+                print("Missing key", key)
+        model.load_state_dict(new_state_trained, strict=False)
+        tqdm.write("Loaded MobileNet weights from {checkpoint_path}")
+        return model
+    raise NotImplementedError(f"MobileNet (trained) is not available for {dataset}")

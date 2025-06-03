@@ -85,7 +85,7 @@ def create_lr_scheduler(
         return lr_scheduler
     elif lr_scheduler == "cosineannealing":
         lr_scheduler = CosineAnnealingLR(
-            optimizer, T_max=config.num_epochs, eta_min=1e-5
+            optimizer, T_max=config.num_epochs, eta_min=1e-3
         )
         return lr_scheduler
     return None

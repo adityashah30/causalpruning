@@ -169,7 +169,7 @@ class Trainer:
             shuffle=data_config.shuffle,
             pin_memory=data_config.pin_memory,
             num_workers=data_config.num_workers,
-            persistent_workers=False,
+            persistent_workers=data_config.num_workers > 0,
         )
         self.testloader = DataLoader(
             data_config.test_dataset,
@@ -249,35 +249,32 @@ class Trainer:
             self.global_step += 1
             self.pbar.update(1)
             config.model.train()
-            loss_avg = AverageMeter()
+            loss_avg = AverageMeter(self.fabric)
             pbar = tqdm(
                 self.trainloader,
                 leave=False,
                 desc=f"{desc}: {epoch + 1}",
                 dynamic_ncols=True,
             )
-            for batch_counter, data in enumerate(pbar):
+            batch_counter = 0
+            for inputs, labels in pbar:
                 config.train_optimizer.zero_grad(set_to_none=True)
-                inputs, labels = data
                 outputs = config.model(inputs)
                 loss = config.loss_fn(outputs, labels)
                 self.fabric.backward(loss)
                 config.train_optimizer.step()
-                loss_avg.update(loss.item())
+                loss_avg.update(loss)
                 if lr_scheduler is not None:
                     lr_scheduler.step_after_batch()
                 if (batch_counter + 1) % tqdm_update_frequency == 0:
                     pbar.update(tqdm_update_frequency)
                 if num_batches_in_epoch > 0 and batch_counter >= num_batches_in_epoch:
                     break
+                batch_counter += 1
             pbar.close()
             if lr_scheduler is not None:
                 lr_scheduler.step_after_epoch()
-            total_loss = torch.tensor([loss_avg.sum])
-            total_loss = self.fabric.all_reduce(total_loss, reduce_op="sum")
-            num_loss = torch.tensor([loss_avg.count])
-            num_loss = self.fabric.all_reduce(num_loss, reduce_op="sum")
-            loss = total_loss.item() / num_loss.item()
+            loss = loss_avg.mean()
             self.add_scalar("Loss/train", loss, self.global_step)
             accuracy = self.eval_model()
             if accuracy > best_accuracy:
@@ -301,45 +298,41 @@ class Trainer:
         num_batches_in_epoch = epoch_config.num_batches_in_epoch
         tqdm_update_frequency = epoch_config.tqdm_update_frequency
         self.pruner.start_iteration()
-        # init_model_state = copy.deepcopy(config.model.state_dict())
+        init_model_state = copy.deepcopy(config.model.state_dict())
         for epoch in range(epoch_config.num_prune_epochs):
             self.global_step += 1
             self.pbar.update(1)
             config.model.train()
-            loss_avg = AverageMeter()
+            loss_avg = AverageMeter(self.fabric)
             pbar = tqdm(
                 self.pruning_trainloader,
                 leave=False,
                 desc=f"Prune epoch: {epoch}",
                 dynamic_ncols=True,
             )
-            for batch_counter, data in enumerate(pbar):
+            batch_counter = 0
+            for inputs, labels in pbar:
                 config.prune_optimizer.zero_grad(set_to_none=True)
-                inputs, labels = data
                 outputs = config.model(inputs)
                 # Compute loss
                 loss = config.loss_fn(outputs, labels)
-                self.pruner.provide_loss_before_step(loss.item())
+                self.pruner.provide_loss_before_step(loss)
                 # Take a gradient step
                 self.fabric.backward(loss)
-                loss_avg.update(loss.item())
+                loss_avg.update(loss)
                 config.prune_optimizer.step()
                 # Compute loss again
                 with torch.no_grad():
                     outputs = config.model(inputs)
                     loss = config.loss_fn(outputs, labels)
-                    self.pruner.provide_loss_after_step(loss.item())
-                # config.model.load_state_dict(init_model_state)
+                    self.pruner.provide_loss_after_step(loss)
                 if (batch_counter + 1) % tqdm_update_frequency == 0:
                     pbar.update(tqdm_update_frequency)
                 if num_batches_in_epoch > 0 and batch_counter >= num_batches_in_epoch:
                     break
+                batch_counter += 1
             pbar.close()
-            total_loss = torch.tensor([loss_avg.sum])
-            total_loss = self.fabric.all_reduce(total_loss, reduce_op="sum")
-            num_loss = torch.tensor([loss_avg.count])
-            num_loss = self.fabric.all_reduce(num_loss, reduce_op="sum")
-            loss = total_loss.item() / num_loss.item()
+            loss = loss_avg.mean()
             self.add_scalar("Loss/train", loss, self.global_step)
             accuracy = np.nan
             if self.pruner.config.eval_after_epoch:
@@ -349,9 +342,10 @@ class Trainer:
             self.pbar.set_description(
                 f"Prune: Iteration {iter_str}; "
                 + f"Epoch: {epoch_str}; "
-                + f"Loss/Train: {loss_avg.avg:.4f}; "
+                + f"Loss/Train: {loss:.4f}; "
                 + f"Accuracy/Test: {accuracy:.4f}"
             )
+        config.model.load_state_dict(init_model_state)
         self.pruner.compute_masks()
         self.compute_prune_stats()
         self.pruner.reset_weights()

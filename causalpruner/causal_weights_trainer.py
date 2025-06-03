@@ -109,7 +109,9 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
             nn.init.zeros_(self.layer.weight)
         elif initialization == "xavier_normal":
             nn.init.xavier_normal_(self.layer.weight)
-        mask = initial_mask.view_as(self.layer.weight)
+        mask = initial_mask.to(self.layer.weight.device, non_blocking=True).view_as(
+            self.layer.weight
+        )
         prune.custom_from_mask(self.layer, "weight", mask)
         self.optimizer = optim.SGD(
             self.layer.parameters(),
@@ -162,6 +164,9 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
             self.max_iter = num_epochs
             self.num_iter_no_change = num_epochs
 
+        if self.max_iter < 1:
+            return
+
         best_lr = self.init_lr
         total_steps = self.max_iter * len(dataloader)
         scheduler = lrrt.create_one_cycle_lr_scheduler(
@@ -179,7 +184,8 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
                 self.optimizer.zero_grad(set_to_none=True)
                 outputs = self.layer(X)
                 Y = Y.view(outputs.size())
-                loss = F.mse_loss(outputs, Y, reduction="mean")
+                # loss = F.mse_loss(outputs, Y, reduction="mean")
+                loss = F.smooth_l1_loss(outputs, Y, beta=1e-10)
                 self.fabric.backward(loss)
                 self.optimizer.step()
                 scheduler.step()
