@@ -10,21 +10,23 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.data import DataLoader, Dataset, default_collate
 from torch.utils.tensorboard import SummaryWriter
 import torchmetrics
 from tqdm.auto import tqdm
 
 from causalpruner import Pruner
-from causalpruner.lrrt import set_optimizer_lr
+from causalpruner.average import AverageMeter
+from causalpruner.lrrt import (
+    get_optimizer_lr,
+    set_optimizer_lr,
+)
 from lr_schedulers import (
     LrSchedulerConfig,
     create_lr_scheduler,
     wrap_lr_scheduler,
 )
 from test_utils import (
-    AverageMeter,
     EvalMetrics,
     MetricsComputer,
 )
@@ -169,14 +171,14 @@ class Trainer:
             shuffle=data_config.shuffle,
             pin_memory=data_config.pin_memory,
             num_workers=data_config.num_workers,
-            persistent_workers=data_config.num_workers > 0,
+            persistent_workers=False,
         )
         self.testloader = DataLoader(
             data_config.test_dataset,
             batch_size=data_config.batch_size,
             shuffle=False,
             pin_memory=data_config.pin_memory,
-            num_workers=data_config.num_workers,
+            num_workers=data_config.num_workers // 2,
             persistent_workers=data_config.num_workers > 0,
         )
         (self.trainloader, self.pruning_trainloader, self.testloader) = (
@@ -298,7 +300,6 @@ class Trainer:
         num_batches_in_epoch = epoch_config.num_batches_in_epoch
         tqdm_update_frequency = epoch_config.tqdm_update_frequency
         self.pruner.start_iteration()
-        init_model_state = copy.deepcopy(config.model.state_dict())
         for epoch in range(epoch_config.num_prune_epochs):
             self.global_step += 1
             self.pbar.update(1)
@@ -345,10 +346,10 @@ class Trainer:
                 + f"Loss/Train: {loss:.4f}; "
                 + f"Accuracy/Test: {accuracy:.4f}"
             )
-        config.model.load_state_dict(init_model_state)
-        self.pruner.compute_masks()
+        self.pruner.compute_masks(get_optimizer_lr(config.prune_optimizer))
         self.compute_prune_stats()
         self.pruner.reset_weights()
+        self.pruner.reset_params()
 
     def create_one_cycle_lr_scheduler(self, train_lr: float, max_lr: float):
         total_steps = self._calculate_total_steps()
@@ -361,7 +362,7 @@ class Trainer:
             anneal_strategy="cos",
         )
 
-    @torch.no_grad
+    @torch.no_grad()
     def eval_model(self) -> float:
         model = self.config.model
         model.eval()
@@ -374,7 +375,7 @@ class Trainer:
         self.add_scalar("Accuracy/Test", accuracy, self.global_step)
         return accuracy
 
-    @torch.no_grad
+    @torch.no_grad()
     def get_all_eval_metrics(self):
         model = self.config.model
         model.eval()
@@ -402,7 +403,7 @@ class Trainer:
         self.add_scalars("Final/Recall", eval_metrics.recall, self.global_step)
         self.add_scalars("Final/F1Score", eval_metrics.f1_score, self.global_step)
 
-    @torch.no_grad
+    @torch.no_grad()
     def compute_prune_stats(self):
         if not self.config.verbose:
             return

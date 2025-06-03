@@ -34,7 +34,13 @@ class ZStats:
 
 
 class ParamDataset(Dataset):
-    def __init__(self, weights_base_dir: str, loss_base_dir: str, use_zscaling: bool):
+    def __init__(
+        self,
+        weights_base_dir: str,
+        loss_base_dir: str,
+        train_lr: float,
+        use_zscaling: bool,
+    ):
         self.weights_base_dir = weights_base_dir
         self.loss_base_dir = loss_base_dir
         file_pattern = "ckpt.*"
@@ -42,6 +48,7 @@ class ParamDataset(Dataset):
             len(glob.glob(file_pattern, root_dir=self.weights_base_dir)),
             len(glob.glob(file_pattern, root_dir=self.loss_base_dir)),
         )
+        self.lr_scaling_factor = train_lr * train_lr
         self.use_zscaling = use_zscaling
         self.weights_zstats = self._load_zstats(self.weights_base_dir)
         self.weight_scaling_factor = np.sqrt(self.weights_zstats.num_params)
@@ -69,6 +76,7 @@ class ParamDataset(Dataset):
             self.weights_base_dir, idx, self.weights_zstats
         )
         delta_loss = self.get_delta_param(self.loss_base_dir, idx)
+        delta_loss /= self.loss_zstats.mean
         return delta_weights, delta_loss
 
     @torch.no_grad()
@@ -77,8 +85,12 @@ class ParamDataset(Dataset):
     ) -> torch.Tensor:
         file_path = os.path.join(dir, f"ckpt.{idx}")
         val = torch.load(file_path)
-        if self.use_zscaling and zstats is not None:
-            val = (val - zstats.global_mean) / zstats.global_std
+        if zstats is not None:
+            if self.use_zscaling:
+                val = (val - zstats.mean) / zstats.std
+                val /= self.weight_scaling_factor
+            else:
+                val /= self.lr_scaling_factor
         val = torch.nan_to_num(val, nan=0, posinf=0, neginf=0)
         return val
 
@@ -221,6 +233,7 @@ class SGDPruner(Pruner):
         self.delta_loss_computer = DeltaComputer()
         self.checkpoint_futures = []
         self.counter = 0
+        self.init_model_state = copy.deepcopy(self.config.model.state_dict())
 
     @torch.no_grad()
     def get_flattened_weight(self) -> torch.Tensor:
@@ -281,14 +294,15 @@ class SGDPruner(Pruner):
         future = self.checkpointer.submit(torch.save, tensor, path)
         self.checkpoint_futures.append(future)
 
-    def compute_masks(self):
-        self.train_pruning_weights()
+    def compute_masks(self, train_lr: float):
+        self.train_pruning_weights(train_lr)
+        self.config.model.load_state_dict(self.init_model_state)
         with torch.no_grad():
             masks = self.get_masks()
             for module_name, module in self.modules_dict.items():
                 prune.custom_from_mask(module, "weight", masks[module_name])
 
-    def train_pruning_weights(self) -> None:
+    def train_pruning_weights(self, train_lr: float) -> None:
         if self.threaded_checkpoint_writer and self.fabric.is_global_zero:
             concurrent.futures.wait(self.checkpoint_futures)
             del self.checkpoint_futures
@@ -306,7 +320,10 @@ class SGDPruner(Pruner):
         )
 
         dataset = ParamDataset(
-            self.weights_dir, self.loss_dir, self.config.use_zscaling
+            self.weights_dir,
+            self.loss_dir,
+            train_lr,
+            self.config.use_zscaling,
         )
 
         batch_size = self.config.batch_size

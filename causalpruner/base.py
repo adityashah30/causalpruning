@@ -18,6 +18,7 @@ class PrunerConfig:
     start_clean: bool
     eval_after_epoch: bool
     reset_weights: bool
+    reset_params: bool
     verbose: bool
 
 
@@ -157,13 +158,14 @@ class Pruner(ABC):
 
     @torch.no_grad()
     def reset_params(self) -> None:
+        if not self.config.reset_params:
+            return
         for module in self.modules_to_reset.values():
             module.reset_parameters()
 
     @torch.no_grad()
     def reset_weights(self) -> None:
         self.config.model.zero_grad(set_to_none=True)
-        # self.reset_params()
         if not self.config.reset_weights:
             return
         masks = dict()
@@ -172,7 +174,6 @@ class Pruner(ABC):
                 masks[name] = getattr(module, "weight_mask")
         self.remove_masks()
         self.fabric.load(self.init_model_path, {"model": self.config.model})
-        # self.reset_params()
         for name, module in self.modules_dict.items():
             if name in masks:
                 prune.custom_from_mask(module, "weight", masks[name])

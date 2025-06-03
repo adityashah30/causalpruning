@@ -15,7 +15,8 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm, trange
 
 from causalpruner import lrrt
-# from causalpruner.lasso_optimizer import LassoSGD
+from causalpruner.average import AverageMeter
+from causalpruner.lasso_optimizer import LassoSGD
 
 
 @dataclass
@@ -113,12 +114,11 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
             self.layer.weight
         )
         prune.custom_from_mask(self.layer, "weight", mask)
-        self.optimizer = optim.SGD(
+        alpha = self.l1_regularization_coeff / num_params
+        self.optimizer = LassoSGD(
             self.layer.parameters(),
             lr=self.init_lr,
-            momentum=0.9,
-            weight_decay=5e-4,
-            nesterov=True,
+            alpha=alpha,
         )
         self.layer, self.optimizer = self.fabric.setup(self.layer, self.optimizer)
         self.prune_amount_this_iteration = self._compute_current_prune_amount(
@@ -167,36 +167,22 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
         if self.max_iter < 1:
             return
 
-        best_lr = self.init_lr
-        total_steps = self.max_iter * len(dataloader)
-        scheduler = lrrt.create_one_cycle_lr_scheduler(
-            self.optimizer, best_lr / 10, best_lr, total_steps
-        )
         tqdm.write(f"Setting learning rate to {lrrt.get_optimizer_lr(self.optimizer)}")
 
         conv_iter = self.max_iter
         for iter in trange(
             self.max_iter, leave=False, desc="Prune weight fitting", dynamic_ncols=True
         ):
-            sumloss = 0.0
-            numlossitems = 0
+            loss_avg = AverageMeter(self.fabric)
             for X, Y in tqdm(dataloader, leave=False, dynamic_ncols=True):
                 self.optimizer.zero_grad(set_to_none=True)
                 outputs = self.layer(X)
                 Y = Y.view(outputs.size())
-                # loss = F.mse_loss(outputs, Y, reduction="mean")
-                loss = F.smooth_l1_loss(outputs, Y, beta=1e-10)
+                loss = F.mse_loss(outputs, Y, reduction="mean")
                 self.fabric.backward(loss)
                 self.optimizer.step()
-                scheduler.step()
-                sumloss += loss.item()
-                numlossitems += 1
-            total_loss = torch.tensor([sumloss])
-            total_loss = self.fabric.all_reduce(total_loss, reduce_op="sum")
-            num_loss = torch.tensor([numlossitems])
-            num_loss = self.fabric.all_reduce(num_loss, reduce_op="sum")
-            num_items = num_loss.item()
-            loss = total_loss.item() / num_items
+                loss_avg.update(loss)
+            loss = loss_avg.mean()
             if self.verbose:
                 tqdm.write(
                     f"Pruning iter: {iter + 1}; "

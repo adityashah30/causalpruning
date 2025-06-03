@@ -208,6 +208,7 @@ def main(args):
                 start_clean=args.start_clean,
                 eval_after_epoch=args.eval_after_epoch,
                 reset_weights=args.reset_weights_after_pruning,
+                reset_params=args.reset_params_after_pruning,
                 num_prune_iterations=args.num_prune_iterations,
                 batch_size=args.causal_pruner_batch_size,
                 verbose=args.verbose,
@@ -231,6 +232,7 @@ def main(args):
                 start_clean=args.start_clean,
                 eval_after_epoch=args.eval_after_epoch,
                 reset_weights=args.reset_weights_after_pruning,
+                reset_params=args.reset_params_after_pruning,
                 prune_amount=prune_amount_per_iteration,
                 verbose=args.verbose,
             )
@@ -314,7 +316,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--train_lr",
         type=float,
-        default=1e-3,
+        default=0.1,
         help="Learning rate for the train optimizer",
     )
     parser.add_argument(
@@ -326,7 +328,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--lr_scheduler",
         type=str,
-        default="onecycle",
+        default="cosineannealing",
         choices=["", "onecycle", "cosineannealing"],
         help="Use the LR scheduler when training",
     )
@@ -473,6 +475,12 @@ def parse_args() -> argparse.Namespace:
         help="Reset weights to an earlier checkpoint after prune step if true.",
     )
     parser.add_argument(
+        "--reset_params_after_pruning",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Reset params (like BatchNorm) to an earlier checkpoint after prune step if true.",
+    )
+    parser.add_argument(
         "--batch_size_while_pruning",
         type=int,
         default=256,
@@ -524,7 +532,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--causal_pruner_loss_tol",
         type=float,
-        default=1e-6,
+        default=1e-7,
         help="Loss tolerance between current loss and best loss for early stopping",
     )
     parser.add_argument(
