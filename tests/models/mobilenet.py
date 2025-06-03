@@ -105,6 +105,6 @@ def get_mobilenet_trained(dataset: str, checkpoint_dir: str) -> nn.Module:
             else:
                 print("Missing key", key)
         model.load_state_dict(new_state_trained, strict=False)
-        tqdm.write("Loaded MobileNet weights from {checkpoint_path}")
+        tqdm.write(f"Loaded MobileNet weights from {checkpoint_path}")
         return model
     raise NotImplementedError(f"MobileNet (trained) is not available for {dataset}")

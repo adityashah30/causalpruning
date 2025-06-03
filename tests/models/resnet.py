@@ -57,7 +57,7 @@ def get_resnet50_trained(dataset: str, checkpoint_dir: str) -> nn.Module:
             else:
                 print("Missing key", key)
         model.load_state_dict(new_state_trained, strict=False)
-        tqdm.write("Loaded Resnet50 weights from {checkpoint_path}")
+        tqdm.write(f"Loaded Resnet50 weights from {checkpoint_path}")
         return model
     raise NotImplementedError(f"Resnet50 (trained) is not available for {dataset}")
 
