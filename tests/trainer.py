@@ -171,7 +171,7 @@ class Trainer:
             shuffle=data_config.shuffle,
             pin_memory=data_config.pin_memory,
             num_workers=data_config.num_workers,
-            persistent_workers=False,
+            persistent_workers=data_config.num_workers > 0,
         )
         self.testloader = DataLoader(
             data_config.test_dataset,
@@ -346,6 +346,9 @@ class Trainer:
                 + f"Loss/Train: {loss:.4f}; "
                 + f"Accuracy/Test: {accuracy:.4f}"
             )
+        # Shotdown pruning_trainloader's worker until next iteration to save resources.
+        del self.pruning_trainloader._iterator
+        self.pruning_trainloader._iterator = None
         self.pruner.compute_masks(get_optimizer_lr(config.prune_optimizer))
         self.compute_prune_stats()
         self.pruner.reset_weights()

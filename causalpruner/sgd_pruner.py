@@ -329,12 +329,13 @@ class SGDPruner(Pruner):
         batch_size = self.config.batch_size
         if batch_size < 0 or not self.trainer.supports_batch_training():
             batch_size = len(dataset)
+        pin_memory = self.config.pin_memory
         num_workers = self.config.num_dataloader_workers
 
         dataloader = DataLoader(
             dataset,
             batch_size=batch_size,
-            pin_memory=False,
+            pin_memory=pin_memory,
             shuffle=True,
             num_workers=num_workers,
             persistent_workers=num_workers > 0,
