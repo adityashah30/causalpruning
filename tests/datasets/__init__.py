@@ -27,6 +27,9 @@ def get_dataset(
         train, test = get_tiny_imagenet(model_name, data_root_dir)
         return (train, test, 200)
     elif dataset_name == "imagenet":
-        train, test = get_imagenet(model_name, data_root_dir)
+        train, test = get_imagenet(model_name, data_root_dir, False)
+        return (train, test, 1000)
+    elif dataset_name == "imagenet_memory":
+        train, test = get_imagenet(model_name, data_root_dir, True)
         return (train, test, 1000)
     raise NotImplementedError(f"{dataset_name} not available.")

@@ -18,6 +18,8 @@ class PrunerConfig:
     start_clean: bool
     eval_after_epoch: bool
     reset_weights: bool
+    reset_params: bool
+    verbose: bool
 
 
 class Pruner(ABC):
@@ -83,8 +85,7 @@ class Pruner(ABC):
         self.checkpoint_dir = config.checkpoint_dir
         self.init_model_path = os.path.join(self.checkpoint_dir, "init.ckpt")
         self.loss_checkpoint_dir = os.path.join(self.checkpoint_dir, "loss")
-        self.weights_checkpoint_dir = os.path.join(
-            self.checkpoint_dir, "weights")
+        self.weights_checkpoint_dir = os.path.join(self.checkpoint_dir, "weights")
 
         # Setup directories on the global_rank = 0
         if self.fabric.is_global_zero:
@@ -129,17 +130,18 @@ class Pruner(ABC):
                 if isinstance(hook, prune.BasePruningMethod):
                     del module._forward_pre_hooks[k]
 
-    def provide_loss_before_step(self, loss: float) -> None:
+    @torch.no_grad()
+    def provide_loss_before_step(self, loss: torch.tensor) -> None:
         pass
 
-    def provide_loss_after_step(self, loss: float) -> None:
+    @torch.no_grad()
+    def provide_loss_after_step(self, loss: torch.tensor) -> None:
         pass
 
     @torch.no_grad()
     def start_pruning(self) -> None:
         if self.fabric.is_global_zero:
-            self.fabric.save(self.init_model_path, {
-                             "model": self.config.model})
+            self.fabric.save(self.init_model_path, {"model": self.config.model})
         self.fabric.barrier()
 
     @torch.no_grad()
@@ -150,20 +152,20 @@ class Pruner(ABC):
             iteration_name = f"{self.iteration}"
             loss_dir = os.path.join(self.loss_checkpoint_dir, iteration_name)
             os.makedirs(loss_dir, exist_ok=True)
-            weights_dir = os.path.join(
-                self.weights_checkpoint_dir, iteration_name)
+            weights_dir = os.path.join(self.weights_checkpoint_dir, iteration_name)
             os.makedirs(weights_dir, exist_ok=True)
         self.fabric.barrier()
 
     @torch.no_grad()
     def reset_params(self) -> None:
+        if not self.config.reset_params:
+            return
         for module in self.modules_to_reset.values():
             module.reset_parameters()
 
     @torch.no_grad()
     def reset_weights(self) -> None:
         self.config.model.zero_grad(set_to_none=True)
-        self.reset_params()
         if not self.config.reset_weights:
             return
         masks = dict()
@@ -172,7 +174,6 @@ class Pruner(ABC):
                 masks[name] = getattr(module, "weight_mask")
         self.remove_masks()
         self.fabric.load(self.init_model_path, {"model": self.config.model})
-        self.reset_params()
         for name, module in self.modules_dict.items():
             if name in masks:
                 prune.custom_from_mask(module, "weight", masks[name])

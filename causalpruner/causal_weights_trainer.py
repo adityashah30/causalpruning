@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Literal
 
@@ -13,7 +14,9 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm, trange
 
-# from causalpruner.lasso_optimizer import LassoSGD
+from causalpruner import lrrt
+from causalpruner.average import AverageMeter
+from causalpruner.lasso_optimizer import LassoSGD
 
 
 @dataclass
@@ -25,11 +28,16 @@ class CausalWeightsTrainerConfig:
     max_iter: int
     loss_tol: float
     num_iter_no_change: int
+    lrrt_num_steps: int = 100
+    lrrt_min_lr: float = 1e-4
+    lrrt_max_lr: float = 10
+    initialization: Literal["zeros", "xavier_normal"] = "zeros"
     backend: Literal["sklearn", "torch"] = "torch"
 
 
 class CausalWeightsTrainer(ABC):
     def __init__(self, config: CausalWeightsTrainerConfig):
+        self.config = config
         self.init_lr = config.init_lr
         self.l1_regularization_coeff = config.l1_regularization_coeff
         self.prune_amount = config.prune_amount
@@ -41,7 +49,7 @@ class CausalWeightsTrainer(ABC):
         return True
 
     @abstractmethod
-    def fit(self, dataloader: DataLoader) -> int:
+    def fit(self, dataloader: DataLoader, num_epochs: int = -1) -> int:
         raise NotImplementedError("Use the sklearn or pytorch version")
 
     @abstractmethod
@@ -66,7 +74,7 @@ class CausalWeightsTrainerSklearn(CausalWeightsTrainer):
     def supports_batch_training(self) -> bool:
         return False
 
-    def fit(self, dataloader: DataLoader) -> int:
+    def fit(self, dataloader: DataLoader, num_epochs: int = -1) -> int:
         X, Y = next(iter(dataloader))
         X = X.cpu().numpy()
         Y = np.ravel(Y.cpu().numpy())
@@ -87,72 +95,110 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
         self,
         config: CausalWeightsTrainerConfig,
         num_params: int,
-        initial_mask=torch.Tensor,
+        initial_mask: torch.Tensor,
+        prune_iteration: int,
+        num_prune_iterations: int,
+        verbose: bool,
     ):
         super().__init__(config)
         self.fabric = config.fabric
         self.num_params = num_params
+        self.verbose = verbose
         self.layer = nn.Linear(self.num_params, 1, bias=False)
-        nn.init.zeros_(self.layer.weight)
-        mask = initial_mask.view_as(self.layer.weight)
+        initialization = config.initialization.lower()
+        if initialization == "zeros":
+            nn.init.zeros_(self.layer.weight)
+        elif initialization == "xavier_normal":
+            nn.init.xavier_normal_(self.layer.weight)
+        mask = initial_mask.to(self.layer.weight.device).view_as(self.layer.weight)
         prune.custom_from_mask(self.layer, "weight", mask)
-        self.optimizer = optim.SGD(
+        alpha = self.l1_regularization_coeff / num_params
+        self.optimizer = LassoSGD(
             self.layer.parameters(),
             lr=self.init_lr,
-            momentum=0.9,
-            weight_decay=5e-4,
-            nesterov=True,
+            alpha=alpha,
         )
-        self.layer, self.optimizer = self.fabric.setup(
-            self.layer, self.optimizer)
+        self.layer, self.optimizer = self.fabric.setup(self.layer, self.optimizer)
+        self.prune_amount_this_iteration = self._compute_current_prune_amount(
+            prune_iteration, num_prune_iterations, self.prune_amount
+        )
+
+    def _compute_current_prune_amount(
+        self,
+        prune_iteration: int,
+        num_prune_iterations: int,
+        total_prune_amount: float,
+    ) -> float:
+        target_prune_amount_this_iteration = self._compute_target_prune_amount(
+            prune_iteration, num_prune_iterations, total_prune_amount
+        )
+        N = 1.0 - target_prune_amount_this_iteration
+        target_prune_amount_last_iteration = self._compute_target_prune_amount(
+            prune_iteration - 1, num_prune_iterations, total_prune_amount
+        )
+        M = 1.0 - target_prune_amount_last_iteration
+        return (M - N) / M
+
+    def _compute_target_prune_amount(
+        self, prune_iteration: int, num_prune_iterations: int, total_prune_amount: float
+    ) -> float:
+        return total_prune_amount * (
+            1 - (1 - prune_iteration / num_prune_iterations) ** 3
+        )
 
     def supports_batch_training(self) -> bool:
         return True
 
-    def _l1_penalty(self) -> float:
-        return torch.norm(self.layer.weight, p=1)
+    def fit(self, dataloader: DataLoader, num_epochs: int = -1) -> int:
+        tqdm.write(f"Prune amount this iteration: {self.prune_amount_this_iteration}")
 
-    def fit(self, dataloader: DataLoader) -> int:
         dataloader = self.fabric.setup_dataloaders(dataloader)
         self.layer.train()
+
         best_loss = np.inf
         iter_no_change = 0
+
+        if num_epochs > 0:
+            self.max_iter = num_epochs
+            self.num_iter_no_change = num_epochs
+
+        if self.max_iter < 1:
+            return
+
+        tqdm.write(f"Setting learning rate to {lrrt.get_optimizer_lr(self.optimizer)}")
 
         conv_iter = self.max_iter
         for iter in trange(
             self.max_iter, leave=False, desc="Prune weight fitting", dynamic_ncols=True
         ):
-            sumloss = 0.0
-            numlossitems = 0
+            loss_avg = AverageMeter(self.fabric)
             for X, Y in tqdm(dataloader, leave=False, dynamic_ncols=True):
+                self.optimizer.zero_grad(set_to_none=True)
                 outputs = self.layer(X)
                 Y = Y.view(outputs.size())
-                loss = (
-                    0.5 * F.mse_loss(outputs, Y, reduction="mean")
-                    + self.l1_regularization_coeff * self._l1_penalty()
-                )
+                loss = F.mse_loss(outputs, Y, reduction="mean")
                 self.fabric.backward(loss)
                 self.optimizer.step()
-                self.optimizer.zero_grad(set_to_none=True)
-                sumloss += loss.item()
-                numlossitems += 1
-            total_loss = torch.tensor([sumloss])
-            total_loss = self.fabric.all_reduce(total_loss, reduce_op="sum")
-            num_loss = torch.tensor([numlossitems])
-            num_loss = self.fabric.all_reduce(num_loss, reduce_op="sum")
-            num_items = num_loss.item()
-            loss = total_loss.item() / num_items
+                loss_avg.update(loss)
+            loss = loss_avg.mean()
+            if self.verbose:
+                tqdm.write(
+                    f"Pruning iter: {iter + 1}; "
+                    + f"loss: {loss}; best_loss: {best_loss}"
+                )
             if loss > (best_loss - self.loss_tol):
                 iter_no_change += 1
             else:
                 iter_no_change = 0
             if loss < best_loss:
                 best_loss = loss
+                best_model_state = deepcopy(self.layer.state_dict())
             if iter_no_change >= self.num_iter_no_change:
                 conv_iter = iter + 1
                 break
+        self.layer.load_state_dict(best_model_state)
         prune.l1_unstructured(
-            self.layer.module, name="weight", amount=self.prune_amount
+            self.layer.module, name="weight", amount=self.prune_amount_this_iteration
         )
         return conv_iter
 

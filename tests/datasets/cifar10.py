@@ -6,7 +6,7 @@ from torchvision.datasets import CIFAR10
 from torchvision.transforms import v2
 
 
-@torch.no_grad()
+@torch.no_grad
 def get_cifar_10(
     model_name: str, data_root_dir: str
 ) -> tuple[data.Dataset, data.Dataset]:
