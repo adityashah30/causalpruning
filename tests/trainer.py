@@ -346,40 +346,37 @@ class Trainer:
                 + f"Loss/Train: {loss:.4f}; "
                 + f"Accuracy/Test: {accuracy:.4f}"
             )
-        # Shotdown pruning_trainloader's worker until next iteration to save resources.
+        # Shutdown pruning_trainloader's worker until next iteration to save resources.
         del self.pruning_trainloader._iterator
         self.pruning_trainloader._iterator = None
         self.pruner.compute_masks(get_optimizer_lr(config.prune_optimizer))
         self.compute_prune_stats()
+        self.fabric.barrier()
         self.pruner.reset_weights()
         self.pruner.reset_params()
 
-    def create_one_cycle_lr_scheduler(self, train_lr: float, max_lr: float):
-        total_steps = self._calculate_total_steps()
-        self.lr_scheduler = optim.lr_scheduler.OneCycleLR(
-            self.config.train_optimizer,
-            max_lr=max_lr,
-            total_steps=total_steps,
-            pct_start=0.1,
-            div_factor=max_lr / train_lr,
-            anneal_strategy="cos",
-        )
-
     @torch.no_grad()
     def eval_model(self) -> float:
-        model = self.config.model
-        model.eval()
-        self.val_accuracy.reset()
-        for data in tqdm(self.testloader, leave=False, desc="Eval", dynamic_ncols=True):
-            inputs, labels = data
-            outputs = model(inputs)
-            self.val_accuracy(outputs, labels)
-        accuracy = self.val_accuracy.compute()
-        self.add_scalar("Accuracy/Test", accuracy, self.global_step)
+        accuracy = np.nan
+        if self.fabric.is_global_zero:
+            model = self.config.model
+            model.eval()
+            self.val_accuracy.reset()
+            for data in tqdm(
+                self.testloader, leave=False, desc="Eval", dynamic_ncols=True
+            ):
+                inputs, labels = data
+                outputs = model(inputs)
+                self.val_accuracy(outputs, labels)
+            accuracy = self.val_accuracy.compute()
+            self.add_scalar("Accuracy/Test", accuracy, self.global_step)
+        self.fabric.barrier()
         return accuracy
 
     @torch.no_grad()
     def get_all_eval_metrics(self):
+        if not self.fabric.is_global_zero:
+            return
         model = self.config.model
         model.eval()
         for data in tqdm(
