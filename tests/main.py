@@ -507,7 +507,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--causal_pruner_l1_regularization_coeff",
         type=float,
-        default=0,
+        default=1e-3,
         help="Causal Pruner L1 regularization coefficient",
     )
     parser.add_argument(

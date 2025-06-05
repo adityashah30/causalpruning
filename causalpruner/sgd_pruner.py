@@ -241,7 +241,7 @@ class SGDPruner(Pruner):
         for param in self.params:
             weight = self.modules_dict[param].weight.detach().clone()
             weights.append(weight)
-        return torch.cat(tuple(map(torch.flatten, weights)))
+        return torch.cat(tuple(map(torch.flatten, weights))).to("cpu")
 
     @torch.no_grad()
     def get_flattened_mask(self) -> torch.Tensor:
@@ -253,7 +253,7 @@ class SGDPruner(Pruner):
                 mask = param_module.weight_mask.detach()
             return torch.flatten(mask)
 
-        return torch.cat(tuple(map(get_mask, self.params)))
+        return torch.cat(tuple(map(get_mask, self.params))).to("cpu")
 
     @torch.no_grad()
     def provide_loss_before_step(self, loss: torch.tensor) -> None:
@@ -369,9 +369,7 @@ class SGDPruner(Pruner):
             end_index += self.params_to_dims[param]
             weight = self.modules_dict[param].weight
             masks[param] = (
-                mask[start_index:end_index]
-                .reshape_as(weight)
-                .to(weight.device, non_blocking=True)
+                mask[start_index:end_index].reshape_as(weight).to(weight.device)
             )
             start_index = end_index
         return masks

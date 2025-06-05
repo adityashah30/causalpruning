@@ -110,9 +110,7 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
             nn.init.zeros_(self.layer.weight)
         elif initialization == "xavier_normal":
             nn.init.xavier_normal_(self.layer.weight)
-        mask = initial_mask.to(self.layer.weight.device, non_blocking=True).view_as(
-            self.layer.weight
-        )
+        mask = initial_mask.to(self.layer.weight.device).view_as(self.layer.weight)
         prune.custom_from_mask(self.layer, "weight", mask)
         alpha = self.l1_regularization_coeff / num_params
         self.optimizer = LassoSGD(
