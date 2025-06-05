@@ -110,6 +110,20 @@ class ZStatsComputer:
         self.global_std_ = None
 
     @torch.no_grad()
+    def to(self, device: torch.device) -> "ZStatsComputer":
+        def move_tensor(tensor):
+            if tensor is not None and tensor.device != device:
+                return tensor.to(device)
+            else:
+                return tensor
+
+        self.sum_x = move_tensor(self.sum_x)
+        self.sum_x_squared = move_tensor(self.sum_x_squared)
+        self.mean_ = move_tensor(self.mean_)
+        self.std_ = move_tensor(self.std_)
+        return self
+
+    @torch.no_grad()
     def add(self, x: torch.Tensor):
         if self.sum_x is None:
             self.num_params = torch.numel(x)
@@ -236,7 +250,7 @@ class SGDPruner(Pruner):
         for param in self.params:
             weight = self.modules_dict[param].weight.detach().clone()
             weights.append(weight)
-        return torch.cat(tuple(map(torch.flatten, weights))).to("cpu")
+        return torch.cat(tuple(map(torch.flatten, weights)))
 
     @torch.no_grad()
     def get_flattened_mask(self) -> torch.Tensor:
@@ -248,34 +262,31 @@ class SGDPruner(Pruner):
                 mask = param_module.weight_mask.detach()
             return torch.flatten(mask)
 
-        return torch.cat(tuple(map(get_mask, self.params))).to("cpu")
+        return torch.cat(tuple(map(get_mask, self.params)))
 
     @torch.no_grad()
     def provide_loss_before_step(self, loss: torch.tensor) -> None:
-        if not self.fabric.is_global_zero:
-            return
-
-        self.delta_loss_computer.add_first(loss.to("cpu"))
-        self.delta_weights_computer.add_first(self.get_flattened_weight())
+        if self.fabric.is_global_zero:
+            self.delta_loss_computer.add_first(loss)
+            self.delta_weights_computer.add_first(self.get_flattened_weight())
+        self.fabric.barrier()
 
     @torch.no_grad()
     def provide_loss_after_step(self, loss: torch.tensor) -> None:
-        if not self.fabric.is_global_zero:
-            return
+        if self.fabric.is_global_zero:
+            self.delta_loss_computer.add_second(loss)
+            self.delta_weights_computer.add_second(self.get_flattened_weight())
 
-        self.delta_loss_computer.add_second(loss.to("cpu"))
-        self.delta_weights_computer.add_second(self.get_flattened_weight())
+            delta_loss = self.delta_loss_computer.get_delta().to("cpu")
+            if delta_loss is not None:
+                self.write_tensor(delta_loss, self._get_checkpoint_path(self.loss_dir))
 
-        delta_loss = self.delta_loss_computer.get_delta()
-        if delta_loss is not None:
-            self.write_tensor(delta_loss, self._get_checkpoint_path(self.loss_dir))
-
-        delta_weights = self.delta_weights_computer.get_delta()
-        if delta_weights is not None:
-            self.write_tensor(
-                delta_weights, self._get_checkpoint_path(self.weights_dir)
-            )
-
+            delta_weights = self.delta_weights_computer.get_delta().to("cpu")
+            if delta_weights is not None:
+                self.write_tensor(
+                    delta_weights, self._get_checkpoint_path(self.weights_dir)
+                )
+        self.fabric.barrier()
         self.counter += 1
 
     @torch.no_grad()
@@ -364,7 +375,7 @@ class SGDPruner(Pruner):
             end_index += self.params_to_dims[param]
             weight = self.modules_dict[param].weight
             masks[param] = (
-                mask[start_index:end_index].reshape_as(weight).to(weight.device)
+                mask[start_index:end_index].to(weight.device).reshape_as(weight)
             )
             start_index = end_index
         return masks
@@ -384,7 +395,7 @@ class SGDPruner(Pruner):
         self, computer: DeltaComputer, dir_path: str
     ):
         dir_path = os.path.join(dir_path, _ZSTATS_PATTERN)
-        zstats_computer = computer.zstats_computer
+        zstats_computer = computer.zstats_computer.to("cpu")
         torch.save(
             {
                 "num_params": zstats_computer.num_params,

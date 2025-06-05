@@ -145,7 +145,7 @@ def main(args):
         test_dataset=test_dataset,
         batch_size=batch_size,
         batch_size_while_pruning=batch_size_while_pruning,
-        num_workers=args.num_dataset_workers,
+        num_workers=args.num_dataloader_workers,
         pin_memory=args.pin_memory,
         shuffle=args.shuffle_dataset,
         num_classes=num_classes,
@@ -372,7 +372,10 @@ def parse_args() -> argparse.Namespace:
         help="Directory to download datasets",
     )
     parser.add_argument(
-        "--num_dataset_workers", type=int, default=8, help="Number of dataset workers"
+        "--num_dataloader_workers",
+        type=int,
+        default=8,
+        help="Number of dataloader workers",
     )
     parser.add_argument(
         "--pin_memory",

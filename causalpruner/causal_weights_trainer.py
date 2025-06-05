@@ -110,7 +110,9 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
             nn.init.zeros_(self.layer.weight)
         elif initialization == "xavier_normal":
             nn.init.xavier_normal_(self.layer.weight)
-        mask = initial_mask.to(self.layer.weight.device).view_as(self.layer.weight)
+        if initial_mask.device != self.layer.weight.device:
+            initial_mask = initial_mask.to(self.layer.weight.device)
+        mask = initial_mask.view_as(self.layer.weight)
         prune.custom_from_mask(self.layer, "weight", mask)
         alpha = self.l1_regularization_coeff / num_params
         self.optimizer = LassoSGD(
@@ -153,7 +155,6 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
         tqdm.write(f"Prune amount this iteration: {self.prune_amount_this_iteration}")
 
         dataloader = self.fabric.setup_dataloaders(dataloader)
-        self.layer.train()
 
         best_loss = np.inf
         iter_no_change = 0
@@ -168,6 +169,8 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
         tqdm.write(f"Setting learning rate to {lrrt.get_optimizer_lr(self.optimizer)}")
 
         conv_iter = self.max_iter
+
+        self.layer.train()
         for iter in trange(
             self.max_iter, leave=False, desc="Prune weight fitting", dynamic_ncols=True
         ):
