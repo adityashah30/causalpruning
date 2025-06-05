@@ -94,11 +94,6 @@ class ParamDataset(Dataset):
         val = torch.nan_to_num(val, nan=0, posinf=0, neginf=0)
         return val
 
-    @property
-    @torch.no_grad()
-    def num_epochs(self) -> int:
-        return int(np.ceil(np.log(self.weights_zstats.num_params / len(self))))
-
 
 class ZStatsComputer:
     def __init__(self):
@@ -260,7 +255,7 @@ class SGDPruner(Pruner):
         if not self.fabric.is_global_zero:
             return
 
-        self.delta_loss_computer.add_first(loss)
+        self.delta_loss_computer.add_first(loss.to("cpu"))
         self.delta_weights_computer.add_first(self.get_flattened_weight())
 
     @torch.no_grad()
@@ -268,7 +263,7 @@ class SGDPruner(Pruner):
         if not self.fabric.is_global_zero:
             return
 
-        self.delta_loss_computer.add_second(loss)
+        self.delta_loss_computer.add_second(loss.to("cpu"))
         self.delta_weights_computer.add_second(self.get_flattened_weight())
 
         delta_loss = self.delta_loss_computer.get_delta()

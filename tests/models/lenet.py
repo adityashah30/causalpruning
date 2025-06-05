@@ -3,17 +3,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-def _calc_output_size(insize: int,
-                      kernel: int,
-                      stride: int) -> int:
+def _calc_output_size(insize: int, kernel: int, stride: int) -> int:
     return int((insize - (kernel - 1) - 1) / stride) + 1
 
 
 class LeNet(nn.Module):
-
-    def __init__(self, num_classes: int,
-                 size_input: tuple[int, int, int],
-                 kernel: int):
+    def __init__(self, num_classes: int, size_input: tuple[int, int, int], kernel: int):
         super().__init__()
         num_features, H, W = size_input
         self.conv1 = nn.Conv2d(num_features, 20, kernel, 1)
@@ -28,17 +23,6 @@ class LeNet(nn.Module):
         self.fc1 = nn.Linear(self.size_flatten, 500)
         self.fc2 = nn.Linear(500, num_classes)
 
-        # initialize weights using kaiming normal
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
-                nn.init.kaiming_normal_(
-                    m.weight,
-                    mode="fan_out",
-                    nonlinearity="relu",
-                )
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-
     def forward(self, x):
         x = F.relu(self.conv1(x))
         x = self.maxpool1(x)
@@ -52,10 +36,10 @@ class LeNet(nn.Module):
 
 def get_lenet(dataset: str) -> nn.Module:
     dataset = dataset.lower()
-    if dataset == 'cifar10':
+    if dataset == "cifar10":
         return LeNet(num_classes=10, size_input=(3, 32, 32), kernel=5)
-    elif dataset == 'fashionmnist':
+    elif dataset == "fashionmnist":
         return LeNet(num_classes=10, size_input=(1, 28, 28), kernel=5)
-    elif dataset == 'tinyimagenet':
+    elif dataset == "tinyimagenet":
         return LeNet(num_classes=200, size_input=(3, 64, 64), kernel=7)
-    raise NotImplementedError(f'LeNet is not available for {dataset}')
+    raise NotImplementedError(f"LeNet is not available for {dataset}")

@@ -556,7 +556,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--causal_pruner_pin_memory",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=True,
         help="Controls if the causal pruner dataloader uses pinned memory.",
     )
     parser.add_argument(
