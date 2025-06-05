@@ -12,6 +12,7 @@ from tqdm.auto import tqdm
 
 from lightning.fabric import Fabric
 import torch
+import torch.multiprocessing as mp
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import torchmetrics
@@ -108,7 +109,9 @@ def main(args: argparse.Namespace):
     )
     testloader = fabric.setup_dataloaders(testloader)
 
-    model = get_model(model_name, dataset_name)
+    model = get_model(model_name, dataset_name, args.trained_checkpoint_dir)
+    if args.compile_model:
+        model = torch.compile(model)
     model = fabric.setup(model)
     if not load_model(fabric, model, model_checkpoint):
         tqdm.write(f"Model does not exist at {model_checkpoint}")
@@ -139,13 +142,45 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         type=str,
-        choices=["lenet", "alexnet", "resnet18", "resnet20", "resnet50"],
+        choices=[
+            "alexnet",
+            "lenet",
+            "mlpnet",
+            "mobilenet_trained",
+            "mobilenet_untrained",
+            "resnet18",
+            "resnet20",
+            "resnet50_torch",
+            "resnet50_trained",
+            "resnet50_untrained",
+        ],
+        default="mlpnet",
         help="Model name",
+    )
+    parser.add_argument(
+        "--trained_checkpoint_dir",
+        type=str,
+        default="models/trained_checkpoints",
+        help="Directory containing trained model checkpoints",
+    )
+    parser.add_argument(
+        "--compile_model",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Compile the model for faster execution.",
     )
     parser.add_argument(
         "--dataset",
         type=str,
-        choices=["cifar10", "fashionmnist", "imagenet", "tinyimagenet"],
+        choices=[
+            "cifar10",
+            "fashionmnist",
+            "imagenet",
+            "imagenet_memory",
+            "mnist",
+            "tinyimagenet",
+        ],
+        default="cifar10",
         help="Dataset name",
     )
     parser.add_argument(
@@ -174,5 +209,6 @@ def parse_args() -> argparse.Namespace:
 
 
 if __name__ == "__main__":
+    mp.set_start_method("spawn")
     args = parse_args()
     main(args)
