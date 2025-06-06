@@ -335,9 +335,7 @@ class Trainer:
             pbar.close()
             loss = loss_avg.mean()
             self.add_scalar("Loss/train", loss, self.global_step)
-            accuracy = np.nan
-            if self.pruner.config.eval_after_epoch:
-                accuracy = self.eval_model()
+            accuracy = self.eval_model()
             iter_str = f"{iteration + 1}/{epoch_config.num_prune_iterations}"
             epoch_str = f"{epoch + 1}/{epoch_config.num_prune_epochs}"
             self.pbar.set_description(

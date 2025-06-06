@@ -16,7 +16,6 @@ class PrunerConfig:
     model: nn.Module
     checkpoint_dir: str
     start_clean: bool
-    eval_after_epoch: bool
     reset_weights: bool
     reset_params: bool
     verbose: bool

@@ -206,7 +206,6 @@ def main(args):
                 pruner="SGDPruner",
                 checkpoint_dir=checkpoint_dir,
                 start_clean=args.start_clean,
-                eval_after_epoch=args.eval_after_epoch,
                 reset_weights=args.reset_weights_after_pruning,
                 reset_params=args.reset_params_after_pruning,
                 num_prune_iterations=args.num_prune_iterations,
@@ -230,7 +229,6 @@ def main(args):
                 pruner="MagPruner",
                 checkpoint_dir=checkpoint_dir,
                 start_clean=args.start_clean,
-                eval_after_epoch=args.eval_after_epoch,
                 reset_weights=args.reset_weights_after_pruning,
                 reset_params=args.reset_params_after_pruning,
                 prune_amount=prune_amount_per_iteration,
@@ -457,12 +455,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--lr", type=float, default=1e-3, help="Prune optimizer learning rate"
-    )
-    parser.add_argument(
-        "--eval_after_epoch",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Eval after each pruning epoch",
     )
     parser.add_argument(
         "--pruner",
