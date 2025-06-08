@@ -2,6 +2,7 @@ import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 import copy
 from dataclasses import dataclass
+import gc
 import glob
 import os
 import shutil
@@ -314,6 +315,10 @@ class SGDPruner(Pruner):
             masks = self.get_masks()
             for module_name, module in self.modules_dict.items():
                 prune.custom_from_mask(module, "weight", masks[module_name])
+        del self.trainer
+        self.trainer = None
+        torch.cuda.empty_cache()
+        gc.collect()
 
     def train_pruning_weights(self, train_lr: float) -> None:
         if self.threaded_checkpoint_writer and self.fabric.is_global_zero:
@@ -322,6 +327,9 @@ class SGDPruner(Pruner):
             self.checkpoint_futures = []
             self._write_zscaling_params()
         self.fabric.barrier()
+
+        torch.cuda.empty_cache()
+        gc.collect()
 
         self.trainer = get_causal_weights_trainer(
             self.trainer_config,
