@@ -74,6 +74,10 @@ class EpochConfig:
     # dataset by default -- which will happen for any value < 0.
     # Use a positive value to limit iterating to a specific number of batches.
     num_batches_in_epoch: int = -1
+    # Number of steps to run the dataloader. Note that we run over the entire
+    # dataset by default -- which will happen for any value < 0.
+    # Use a positive value to limit iterating to a specific number of batches.
+    num_batches_in_epoch_while_pruning: int = -1
     # The frequency with which the tqdm progress bar is updated. Set to a
     # larger value for a fast iteration -- else tqdm update will be the
     # bottleneck.
@@ -297,7 +301,7 @@ class Trainer:
     def _run_prune_iteration(self, iteration):
         config = self.config
         epoch_config = self.epoch_config
-        num_batches_in_epoch = epoch_config.num_batches_in_epoch
+        num_batches_in_epoch = epoch_config.num_batches_in_epoch_while_pruning
         tqdm_update_frequency = epoch_config.tqdm_update_frequency
         self.pruner.start_iteration()
         for epoch in range(epoch_config.num_prune_epochs):
@@ -377,20 +381,25 @@ class Trainer:
             return
         model = self.config.model
         model.eval()
+        self.val_accuracy.reset()
+        self.metrics_computer.reset()
         for data in tqdm(
             self.testloader, leave=False, desc="Eval Stats", dynamic_ncols=True
         ):
             inputs, labels = data
             outputs = model(inputs)
             self.metrics_computer.add(outputs, labels)
+            self.val_accuracy(outputs, labels)
         eval_metrics = self.metrics_computer.compute()
-        self._print_eval_metrics(eval_metrics)
+        final_accuracy = self.val_accuracy.compute()
+        self._print_eval_metrics(final_accuracy, eval_metrics)
 
-    def _print_eval_metrics(self, eval_metrics: EvalMetrics):
+    def _print_eval_metrics(self, final_accuracy: float, eval_metrics: EvalMetrics):
         if not self.fabric.is_global_zero:
             return
         tqdm.write("\n======================================================\n")
         tqdm.write("Final eval metrics:")
+        tqdm.write(f"Final Accuracy: {final_accuracy:.4f}")
         tqdm.write(f"Accuracy: {eval_metrics.accuracy}")
         tqdm.write(f"Precision: {eval_metrics.precision}")
         tqdm.write(f"Recall: {eval_metrics.recall}")

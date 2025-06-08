@@ -17,7 +17,7 @@ _DEFAULT_TRANSFORMS = [
 def get_mnist(model_name: str, data_root_dir: str) -> tuple[data.Dataset, data.Dataset]:
     model_name = model_name.lower()
     mnist_root_dir = os.path.join(data_root_dir, "mnist")
-    if model_name == "mlpnet":
+    if model_name in ["mlpnet", "mlpnet_trained"]:
         transform = v2.Compose(_DEFAULT_TRANSFORMS)
         train = MNIST(mnist_root_dir, train=True, download=True, transform=transform)
         test = MNIST(mnist_root_dir, train=False, download=True, transform=transform)

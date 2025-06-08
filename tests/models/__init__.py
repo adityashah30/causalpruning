@@ -2,7 +2,10 @@ from typing import Optional
 
 from .alexnet import get_alexnet
 from .lenet import get_lenet
-from .mlpnet import get_mlpnet
+from .mlpnet import (
+    get_mlpnet,
+    get_mlpnet_trained,
+)
 from .mobilenet import (
     get_mobilenet_trained,
     get_mobilenet_untrained,
@@ -13,7 +16,10 @@ from .resnet import (
     get_resnet50_trained,
     get_resnet50_untrained,
 )
-from .resnet_cifar import get_resnet20
+from .resnet_cifar import (
+    get_resnet20,
+    get_resnet20_trained,
+)
 
 import torch.nn as nn
 
@@ -26,6 +32,8 @@ def get_model(model_name: str, dataset_name: str, checkpoint_dir: str) -> nn.Mod
         return get_alexnet(dataset_name)
     elif model_name == "mlpnet":
         return get_mlpnet(dataset_name)
+    elif model_name == "mlpnet_trained":
+        return get_mlpnet_trained(dataset_name, checkpoint_dir)
     elif model_name == "mobilenet_untrained":
         return get_mobilenet_untrained(dataset_name)
     elif model_name == "mobilenet_trained":
@@ -34,6 +42,8 @@ def get_model(model_name: str, dataset_name: str, checkpoint_dir: str) -> nn.Mod
         return get_resnet18(dataset_name)
     elif model_name == "resnet20":
         return get_resnet20(dataset_name)
+    elif model_name == "resnet20_trained":
+        return get_resnet20_trained(dataset_name, checkpoint_dir)
     elif model_name == "resnet50_torch":
         return get_resnet50_torch(dataset_name)
     elif model_name == "resnet50_untrained":

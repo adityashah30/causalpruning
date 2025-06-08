@@ -1,5 +1,8 @@
+import os
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from tqdm.auto import tqdm
 
 
 class MlpNet(nn.Module):
@@ -43,3 +46,14 @@ def get_mlpnet(dataset: str) -> nn.Module:
     elif dataset == "mnist":
         return MlpNet(input_size=784, nh1=40, nh2=20, num_classes=10)
     raise NotImplementedError(f"MlpNet is not available for {dataset}")
+
+
+def get_mlpnet_trained(dataset: str, checkpoint_dir: str) -> nn.Module:
+    dataset = dataset.lower()
+    if dataset == "mnist":
+        model = MlpNet(input_size=784, nh1=40, nh2=20, num_classes=10)
+        checkpoint_path = os.path.join(checkpoint_dir, "mlpnet_mnist.pth")
+        model.load_state_dict(torch.load(checkpoint_path, map_location="cpu")["model"])
+        tqdm.write(f"Loaded MlpNet weights from {checkpoint_path}")
+        return model
+    raise NotImplementedError(f"MlpNet (trained) is not available for {dataset}")

@@ -12,7 +12,14 @@ def get_cifar_10(
 ) -> tuple[data.Dataset, data.Dataset]:
     model_name = model_name.lower()
     cifar_root_dir = os.path.join(data_root_dir, "cifar10")
-    if model_name in ["alexnet", "lenet", "mlpnet", "resnet18", "resnet20"]:
+    if model_name in [
+        "alexnet",
+        "lenet",
+        "mlpnet",
+        "resnet18",
+        "resnet20",
+        "resnet20_trained",
+    ]:
         train_transforms = v2.Compose(
             [
                 v2.RandomCrop(32),

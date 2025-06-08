@@ -160,6 +160,7 @@ def main(args):
         num_prune_epochs=args.num_prune_epochs if args.prune else 0,
         num_train_epochs=args.num_train_epochs,
         num_batches_in_epoch=args.num_batches_in_epoch,
+        num_batches_in_epoch_while_pruning=args.num_batches_in_epoch_while_pruning,
         tqdm_update_frequency=args.tqdm_update_frequency,
     )
     lr_scheduler_config = LrSchedulerConfig(
@@ -275,10 +276,12 @@ def parse_args() -> argparse.Namespace:
             "alexnet",
             "lenet",
             "mlpnet",
+            "mlpnet_trained",
             "mobilenet_trained",
             "mobilenet_untrained",
             "resnet18",
             "resnet20",
+            "resnet20_trained",
             "resnet50_torch",
             "resnet50_trained",
             "resnet50_untrained",
@@ -446,6 +449,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=-1,
         help="Number of batches per epoch. Runs the entire epoch by default",
+    )
+    parser.add_argument(
+        "--num_batches_in_epoch_while_pruning",
+        type=int,
+        default=-1,
+        help="Number of batches in epoch while training before pruning",
     )
     parser.add_argument(
         "--tqdm_update_frequency", type=int, default=1, help="tqdm update frequency."
