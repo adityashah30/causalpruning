@@ -10,7 +10,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.utils.prune as prune
-import torch.optim as optim
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm, trange
 
@@ -23,15 +22,14 @@ from causalpruner.lasso_optimizer import LassoSGD
 class CausalWeightsTrainerConfig:
     fabric: Fabric
     init_lr: float
+    batch_size: int
+    num_dataloader_workers: int
+    pin_memory: bool
     l1_regularization_coeff: float
     prune_amount: float
     max_iter: int
     loss_tol: float
     num_iter_no_change: int
-    lrrt_num_steps: int = 100
-    lrrt_min_lr: float = 1e-4
-    lrrt_max_lr: float = 10
-    initialization: Literal["zeros", "xavier_normal"] = "zeros"
     backend: Literal["sklearn", "torch"] = "torch"
 
 
@@ -105,11 +103,7 @@ class CausalWeightsTrainerTorch(CausalWeightsTrainer):
         self.num_params = num_params
         self.verbose = verbose
         self.layer = nn.Linear(self.num_params, 1, bias=False)
-        initialization = config.initialization.lower()
-        if initialization == "zeros":
-            nn.init.zeros_(self.layer.weight)
-        elif initialization == "xavier_normal":
-            nn.init.xavier_normal_(self.layer.weight)
+        nn.init.zeros_(self.layer.weight)
         if initial_mask.device != self.layer.weight.device:
             initial_mask = initial_mask.to(self.layer.weight.device)
         mask = initial_mask.view_as(self.layer.weight)

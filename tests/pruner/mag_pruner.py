@@ -15,10 +15,10 @@ class MagPruner(Pruner):
         super().__init__(config)
         self.prune_amount = config.prune_amount
 
-    def compute_masks(self) -> None:
+    def run_prune_iteration(self) -> None:
         params_to_prune = []
         for param in self.params:
-            params_to_prune.append((self.modules_dict[param], 'weight'))
+            params_to_prune.append((self.modules_dict[param], "weight"))
         prune.global_unstructured(
             params_to_prune,
             pruning_method=prune.L1Unstructured,

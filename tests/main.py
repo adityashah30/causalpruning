@@ -14,6 +14,7 @@ import torch
 import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 
 from causalpruner import (
@@ -45,13 +46,6 @@ torch.backends.cudnn.benchmark = True
 def delete_dir_if_exists(dir: str):
     if os.path.exists(dir):
         shutil.rmtree(dir)
-
-
-def get_prune_optimizer(name: str, model: nn.Module, lr: float) -> optim.Optimizer:
-    name = name.lower()
-    if name == "sgd":
-        return optim.SGD(model.parameters(), lr=lr)
-    raise NotImplementedError(f"{name} is not a supported Optimizier")
 
 
 def get_train_optimizer(name: str, model: nn.Module, lr: float) -> optim.Optimizer:
@@ -124,11 +118,8 @@ def main(args):
     model = get_model(model_name, dataset_name, args.trained_checkpoint_dir)
     if args.compile_model:
         model = torch.compile(model)
-    prune_optimizer = get_prune_optimizer(args.optimizer, model, args.lr)
     train_optimizer = get_train_optimizer(args.train_optimizer, model, args.train_lr)
-    model, prune_optimizer, train_optimizer = fabric.setup(
-        model, prune_optimizer, train_optimizer
-    )
+    model, train_optimizer = fabric.setup(model, train_optimizer)
     train_dataset, test_dataset, num_classes = get_dataset(
         dataset_name,
         model_name,
@@ -174,7 +165,6 @@ def main(args):
         hparams=vars(args),
         fabric=fabric,
         model=model,
-        prune_optimizer=prune_optimizer,
         train_optimizer=train_optimizer,
         data_config=data_config,
         epoch_config=epoch_config,
@@ -194,12 +184,22 @@ def main(args):
                 fabric=fabric,
                 init_lr=args.causal_pruner_init_lr,
                 l1_regularization_coeff=args.causal_pruner_l1_regularization_coeff,
-                initialization=args.causal_pruner_weights_initialization,
                 prune_amount=total_prune_amount,
                 max_iter=args.causal_pruner_max_iter,
                 loss_tol=args.causal_pruner_loss_tol,
                 num_iter_no_change=args.causal_pruner_num_iter_no_change,
+                batch_size=args.causal_pruner_batch_size,
+                num_dataloader_workers=args.num_causal_pruner_dataloader_workers,
+                pin_memory=args.causal_pruner_pin_memory,
                 backend=args.causal_pruner_backend,
+            )
+            prune_dataloader = DataLoader(
+                data_config.train_dataset,
+                batch_size=data_config.batch_size_while_pruning,
+                shuffle=data_config.shuffle,
+                pin_memory=data_config.pin_memory,
+                num_workers=data_config.num_workers,
+                persistent_workers=data_config.num_workers > 0,
             )
             pruner_config = SGDPrunerConfig(
                 fabric=fabric,
@@ -210,14 +210,14 @@ def main(args):
                 reset_weights=args.reset_weights_after_pruning,
                 reset_params=args.reset_params_after_pruning,
                 num_prune_iterations=args.num_prune_iterations,
-                batch_size=args.causal_pruner_batch_size,
+                num_prune_epochs=args.num_prune_epochs,
+                prune_dataloader=prune_dataloader,
+                prune_optimizer_lr=args.causal_pruner_train_lr,
                 verbose=args.verbose,
-                num_dataloader_workers=args.num_causal_pruner_dataloader_workers,
-                pin_memory=args.causal_pruner_pin_memory,
                 threaded_checkpoint_writer=args.causal_pruner_threaded_checkpoint_writer,
                 delete_checkpoint_dir_after_training=args.delete_checkpoint_dir_after_training,
-                use_zscaling=args.causal_pruner_use_zscaling,
                 trainer_config=causal_weights_trainer_config,
+                num_batches_in_epoch=epoch_config.num_batches_in_epoch_while_pruning,
             )
         elif args.pruner == "magpruner":
             num_prune_iterations = args.num_prune_iterations
@@ -463,7 +463,10 @@ def parse_args() -> argparse.Namespace:
         "--optimizer", type=str, default="sgd", help="Optimizer", choices=["sgd"]
     )
     parser.add_argument(
-        "--lr", type=float, default=1e-3, help="Prune optimizer learning rate"
+        "--causal_pruner_train_lr",
+        type=float,
+        default=1e-3,
+        help="Prune optimizer learning rate when using Causal Pruning",
     )
     parser.add_argument(
         "--pruner",
@@ -515,23 +518,10 @@ def parse_args() -> argparse.Namespace:
         help="Causal Pruner L1 regularization coefficient",
     )
     parser.add_argument(
-        "--causal_pruner_weights_initialization",
-        type=str,
-        default="zeros",
-        choices=["zeros", "xavier_normal"],
-        help="Causal Pruner model weights initialization scheme",
-    )
-    parser.add_argument(
         "--causal_pruner_max_iter",
         type=int,
         default=30,
         help="Maximum number of iterations to run causal pruner training",
-    )
-    parser.add_argument(
-        "--causal_pruner_use_zscaling",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="Controls whether causal pruner model uses zscaling or not",
     )
     parser.add_argument(
         "--causal_pruner_loss_tol",
